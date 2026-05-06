@@ -2,10 +2,39 @@
 
 ## Option A: GitHub Pages + External API Host
 
-1. Enable GitHub Pages in repository settings.
-2. Use the deploy-client-pages workflow to publish src/CvWeb.Client.
-3. Host src/CvWeb.DataPump on a free ASP.NET-capable service.
-4. Configure CORS and API base URL for the production origin.
+### 1. Prepare the backend Data Pump host
+
+1. Deploy src/CvWeb.DataPump to a free ASP.NET Core host (for example Azure App Service free tier or Render).
+2. Confirm these endpoints are reachable:
+	- /api/health
+	- /api/telemetry
+	- /hubs/telemetry
+	- /api/mjpeg/stream
+3. Keep HTTPS enabled for browser mixed-content safety.
+
+### 2. Configure the GitHub repository
+
+1. Open repository settings for cjhawes/cvweb.
+2. In Settings > Pages, set source to GitHub Actions.
+3. In Settings > Secrets and variables > Actions > Variables, add:
+	- DATAPUMP_BASE_URL = https://your-datapump-host
+
+### 3. Publish the SPA
+
+1. Push to main or run deploy-client-pages manually.
+2. The workflow will:
+	- Publish Blazor WASM static assets
+	- Rewrite base href to /cvweb/
+	- Generate 404.html SPA fallback
+	- Deploy to GitHub Pages
+3. Open https://cjhawes.github.io/cvweb/.
+
+### 4. Verify production behavior
+
+1. Check /dashboard loads all five widgets.
+2. Confirm SignalR telemetry is live.
+3. Confirm MJPEG boundary count increments.
+4. Confirm WebRTC diagnostics moves to connected state.
 
 ## Option B: Azure Static Web Apps + External API Host
 

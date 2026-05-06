@@ -40,6 +40,21 @@ jobs:
       - name: Publish client
         run: dotnet publish src/CvWeb.Client/CvWeb.Client.csproj --configuration Release --output release/wwwroot
 
+      - name: Rewrite base href for project pages
+        shell: bash
+        run: |
+          sed -i 's|<base href="/" />|<base href="/cvweb/" />|g' release/wwwroot/index.html
+
+      - name: Apply Data Pump URL from repo variable
+        if: ${{ vars.DATAPUMP_BASE_URL != '' }}
+        shell: bash
+        run: |
+          sed -i "s|\"DataPumpBaseUrl\": \"[^\"]*\"|\"DataPumpBaseUrl\": \"${{ vars.DATAPUMP_BASE_URL }}\"|g" release/wwwroot/appsettings.json
+
+      - name: Add SPA fallback page
+        shell: bash
+        run: cp release/wwwroot/index.html release/wwwroot/404.html
+
       - name: Add nojekyll marker
         shell: bash
         run: touch release/wwwroot/.nojekyll
