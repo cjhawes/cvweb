@@ -66,11 +66,13 @@
 </main>
 
 @code {
+    private readonly string _landingOwnerToken = $"dashboard-{Guid.NewGuid():N}";
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            await JS.InvokeVoidAsync("cvLanding.init");
+            await JS.InvokeVoidAsync("cvLanding.init", _landingOwnerToken);
         }
     }
 
@@ -79,7 +81,7 @@
         try
         {
             await JS.InvokeVoidAsync("cvDashboard.disposeAll");
-            await JS.InvokeVoidAsync("cvLanding.dispose");
+            await JS.InvokeVoidAsync("cvLanding.dispose", _landingOwnerToken);
         }
         catch (JSException)
         {

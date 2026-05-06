@@ -1,6 +1,7 @@
 (() => {
     const landingState = {
         initialized: false,
+        ownerToken: null,
         observer: null,
         animationFrame: null,
         resizeHandler: null,
@@ -15,23 +16,28 @@
         webrtcSessions: new Map()
     };
 
-    function initLanding() {
-        if (landingState.initialized) {
+    function initLanding(ownerToken) {
+        const nextOwnerToken = ownerToken || "default";
+        if (landingState.initialized && landingState.ownerToken !== nextOwnerToken) {
+            tearDownLanding();
+        }
+
+        if (landingState.initialized && landingState.ownerToken === nextOwnerToken) {
+            setUpRevealObserver();
             return;
         }
 
+        landingState.ownerToken = nextOwnerToken;
         landingState.initialized = true;
         setUpRevealObserver();
         setUpParallaxOffset();
         setUpParticleField();
     }
 
-    function disposeLanding() {
+    function tearDownLanding() {
         if (!landingState.initialized) {
             return;
         }
-
-        landingState.initialized = false;
 
         if (landingState.observer) {
             landingState.observer.disconnect();
@@ -60,7 +66,22 @@
         landingState.particles = [];
         landingState.canvas = null;
         landingState.context = null;
+        landingState.ownerToken = null;
+        landingState.initialized = false;
         document.documentElement.style.removeProperty("--scroll-offset");
+    }
+
+    function disposeLanding(ownerToken) {
+        if (!landingState.initialized) {
+            return;
+        }
+
+        const currentOwnerToken = ownerToken || "default";
+        if (landingState.ownerToken !== currentOwnerToken) {
+            return;
+        }
+
+        tearDownLanding();
     }
 
     function setUpRevealObserver() {
