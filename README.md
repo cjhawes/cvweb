@@ -1,86 +1,84 @@
 # CvWeb
 
-A two-tier Single Page Application that combines a cinematic CV landing page with a live technical sandbox.
+CvWeb is a two-tier portfolio application built with .NET 10.
+
+- Tier 1: a CV-first Blazor WebAssembly landing page
+- Tier 2: a live technical dashboard backed by synthetic telemetry, MJPEG, and WebRTC diagnostics
 
 ## Architecture
 
-- Frontend: Blazor WebAssembly SPA in src/CvWeb.Client
-- Backend Data Pump: ASP.NET Core Minimal API in src/CvWeb.DataPump
-- Solution: CvWeb.slnx
+- Frontend SPA: `src/CvWeb.Client`
+- Backend Data Pump API: `src/CvWeb.DataPump`
+- Solution entry: `CvWeb.slnx`
 
-## Tier 1 Landing Page
+## Features
 
-The root route / is implemented as a high-impact visual CV with:
+### CV and Portfolio Landing (`/`)
 
-- Dark, modern visual design with cyan and electric orange accents
-- Bold headline typography
-- Scroll reveal animations for content sections
-- Subtle parallax and animated particle background
-- Terminal-style CTA: > Enter the Control Room
+- Cinematic visual direction and motion system
+- Structured CV content with career outcomes and technical toolkit
+- Responsive hero and profile snapshot layout
+- Navigation to live portfolio dashboard
 
-## Tier 2 Data Pump API
+### Live Dashboard (`/dashboard` and `/control-room`)
 
-The Data Pump provides synthetic streams and metadata for sandbox scenarios.
+- Project 01: WASM image drift comparison
+- Project 02: SignalR telemetry sparkline and health chips
+- Project 03: MJPEG boundary decoder on canvas
+- Project 04: Browser-local alarm triage model
+- Project 05: WebRTC diagnostics and frame health
+
+Each widget is wrapped in a flip-card that shows challenge, solution, stack, and source link.
+
+### Data Pump API
 
 Core endpoints:
 
-- GET /api/health
-- GET /api/telemetry?node=edge-gateway-a&samples=24
-- GET /api/video/frame-meta?width=1920&height=1080&fps=30
-- GET /api/webrtc/tracks?profile=balanced
-- GET /api/mjpeg/stream?fps=30
-- SignalR hub: /hubs/telemetry
-
-## Tier 2 Control Room Dashboard
-
-The dashboard route /dashboard hosts five concurrent widgets in a dark CSS Grid control-room layout:
-
-- Widget 1: WASM image byte-level drift detection
-- Widget 2: SignalR live telemetry sparkline
-- Widget 3: MJPEG boundary decoder rendered to canvas
-- Widget 4: Browser-local alarm triage model and priority feed
-- Widget 5: WebRTC diagnostics with live frame health metrics
-
-Every widget supports a stage-4 flip interaction with:
-
-- Challenge
-- Solution
-- Stack
-- Direct source code link
+- `GET /api/health`
+- `GET /api/telemetry?node=edge-gateway-a&samples=24`
+- `GET /api/video/frame-meta?width=1920&height=1080&fps=30`
+- `GET /api/webrtc/tracks?profile=balanced`
+- `GET /api/mjpeg/stream?fps=30`
+- SignalR hub: `/hubs/telemetry`
 
 ## Local Development
 
-From the repository root:
+From repository root:
 
-1. Restore dependencies
-   dotnet restore CvWeb.slnx --configfile NuGet.Config
-2. Build solution
-   dotnet build CvWeb.slnx --configuration Release
-3. Run backend Data Pump (terminal 1)
-   dotnet run --project src/CvWeb.DataPump
-4. Run Blazor client (terminal 2)
-   dotnet run --project src/CvWeb.Client
+```bash
+dotnet restore CvWeb.slnx --configfile NuGet.Config
+dotnet build CvWeb.slnx --configuration Release
+dotnet run --project src/CvWeb.DataPump
+dotnet run --project src/CvWeb.Client
+```
 
-## Hosting Model
+Default local addresses:
 
-- SPA hosting target: GitHub Pages or Azure Static Web Apps
-- API hosting target: any free ASP.NET-capable platform (for example Azure free tier or Render)
-- CI/CD: GitHub Actions workflows in .github/workflows
+- Client: `http://localhost:5205`
+- Data Pump: `http://localhost:5094`
 
-## Notes For GitHub Pages
+## CI/CD
 
-This repository is configured for project pages at:
+- CI workflow: `.github/workflows/ci.yml`
+- GitHub Pages deploy workflow: `.github/workflows/deploy-client-pages.yml`
 
-- https://cjhawes.github.io/cvweb/
+The deploy workflow:
 
-Setup steps:
+1. Publishes Blazor static assets
+2. Rewrites base href to `/cvweb/`
+3. Applies `DATAPUMP_BASE_URL` when configured
+4. Creates `404.html` SPA fallback
+5. Deploys to GitHub Pages
 
-1. Open repository settings and set Pages source to GitHub Actions.
-2. In repository settings, add variable DATAPUMP_BASE_URL with your deployed Data Pump URL.
-3. Push to main, or run the deploy-client-pages workflow manually.
-4. Wait for the deploy job to complete and open https://cjhawes.github.io/cvweb/.
+## Hosting
 
-Notes:
+Published frontend target:
 
-- The workflow rewrites base href to /cvweb/ during publish.
-- A 404.html fallback is generated for SPA route refresh support.
+- `https://cjhawes.github.io/cvweb/`
+
+Backend can be hosted on any ASP.NET Core-capable service.
+
+## Documentation
+
+- Developer handbook: `docs/developer-guide.md`
+- Hosting runbook: `docs/hosting.md`

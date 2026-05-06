@@ -104,13 +104,15 @@ a {
 
 .hero-cv {
     display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.9fr);
-    gap: 1rem;
+    grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.8fr);
+    gap: 1rem 1.35rem;
     align-items: start;
 }
 
 .hero-main {
     min-width: 0;
+    position: relative;
+    z-index: 1;
 }
 
 .kicker {
@@ -126,9 +128,9 @@ a {
     max-width: 14ch;
     text-wrap: balance;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.03em;
     line-height: 0.92;
-    font-size: clamp(3.1rem, 9.4vw, 7.4rem);
+    font-size: clamp(2.6rem, 6.2vw, 5.6rem);
     font-family: "Arial Black", "Impact", sans-serif;
     text-shadow: 0 0 24px rgba(45, 246, 255, 0.16);
 }
@@ -150,6 +152,8 @@ a {
 
 .profile-panel {
     min-height: 100%;
+    position: relative;
+    z-index: 0;
 }
 
 .profile-facts {
@@ -706,10 +710,6 @@ a {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .hero-cv {
-        grid-template-columns: 1fr;
-    }
-
     .portfolio-grid {
         grid-template-columns: 1fr 1fr;
     }
@@ -720,6 +720,22 @@ a {
 
     .widget-grid .widget-card:last-child {
         grid-column: span 1;
+    }
+}
+
+@media (max-width: 1180px) {
+    .hero-cv {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .hero h1 {
+        max-width: 11ch;
+        font-size: clamp(2.9rem, 8vw, 5.6rem);
+    }
+
+    .profile-panel {
+        width: min(100%, 760px);
     }
 }
 

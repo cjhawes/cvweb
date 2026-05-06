@@ -1,5 +1,7 @@
 # Hosting Guidance
 
+For full engineering context and operational guidance, see `docs/developer-guide.md`.
+
 ## Option A: GitHub Pages + External API Host
 
 ### 1. Prepare the backend Data Pump host
@@ -11,6 +13,7 @@
 	- /hubs/telemetry
 	- /api/mjpeg/stream
 3. Keep HTTPS enabled for browser mixed-content safety.
+4. After deployment is stable, restrict CORS to your production frontend origin.
 
 ### 2. Configure the GitHub repository
 
@@ -35,6 +38,7 @@
 2. Confirm SignalR telemetry is live.
 3. Confirm MJPEG boundary count increments.
 4. Confirm WebRTC diagnostics moves to connected state.
+5. Confirm browser refresh on /dashboard resolves correctly (SPA fallback).
 
 ## Option B: Azure Static Web Apps + External API Host
 
