@@ -416,44 +416,38 @@ a {
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
     overflow: hidden;
-    will-change: transform, opacity;
-    transition: transform 0.62s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.28s ease;
+    will-change: auto;
+    transition: none;
 }
 
 .widget-front,
 .widget-back {
     display: flex;
     flex-direction: column;
-    transform-origin: center center;
 }
 
 .widget-front {
-    transform: rotateY(0deg);
-    opacity: 1;
     visibility: visible;
     pointer-events: auto;
     z-index: 2;
 }
 
 .widget-back {
-    transform: rotateY(180deg);
-    opacity: 0;
+    display: none;
     visibility: hidden;
     pointer-events: none;
     z-index: 1;
 }
 
 .widget-card.is-flipped .widget-front {
-    transform: rotateY(-180deg);
-    opacity: 0;
+    display: none;
     visibility: hidden;
     pointer-events: none;
     z-index: 1;
 }
 
 .widget-card.is-flipped .widget-back {
-    transform: rotateY(0deg);
-    opacity: 1;
+    display: flex;
     visibility: visible;
     pointer-events: auto;
     z-index: 2;
