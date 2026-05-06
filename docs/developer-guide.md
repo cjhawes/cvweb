@@ -125,6 +125,59 @@ When running locally, default is:
 }
 ```
 
+## 4.5 GitHub Codespaces Setup and Maintenance
+
+Use this workflow when developing CvWeb in GitHub Codespaces.
+
+Initial setup:
+
+1. Open the repository in GitHub and create a new Codespace from `main`.
+2. Wait for the container to finish initialization.
+3. In the Codespace terminal, run:
+
+```bash
+dotnet restore CvWeb.slnx --configfile NuGet.Config
+dotnet build CvWeb.slnx --configuration Release
+```
+
+Running the app in Codespaces:
+
+1. Start backend in terminal A:
+
+```bash
+dotnet run --project src/CvWeb.DataPump
+```
+
+2. Start frontend in terminal B:
+
+```bash
+dotnet run --project src/CvWeb.Client
+```
+
+3. In the `Ports` view, ensure ports `5094` and `5205` are forwarded.
+4. Set port visibility according to your need:
+   - `Private` for normal development
+   - `Public` only when external device/browser validation is required
+
+Codespaces maintenance checklist:
+
+1. Rebuild after dependency or workflow changes:
+
+```bash
+dotnet restore CvWeb.slnx --configfile NuGet.Config
+dotnet build CvWeb.slnx --configuration Release
+```
+
+2. Keep local branch synchronized with `main` before larger edits.
+3. Stop long-running terminals when not actively testing to reduce resource usage.
+4. Periodically clean stale artifacts if disk pressure appears:
+
+```bash
+dotnet clean CvWeb.slnx
+```
+
+5. Before commit/push from Codespaces, run the validation checklist in section 8.
+
 ## 5. Frontend Implementation Guide
 
 ## 5.1 Bootstrapping
