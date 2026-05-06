@@ -1,0 +1,52 @@
+@inject HttpClient Http
+
+<div class="widget-metrics-grid">
+    <figure class="diff-image-card">
+        <figcaption>Reference</figcaption>
+        <img src="images/camera-reference.svg" alt="Reference camera frame" />
+    </figure>
+    <figure class="diff-image-card">
+        <figcaption>Live Snapshot</figcaption>
+        <img src="images/camera-live.svg" alt="Live camera frame" />
+    </figure>
+</div>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Byte Delta: @ChangedBytes</span>
+    <span class="metric-chip">Total Compared: @ComparedBytes</span>
+    <span class="metric-chip @StatusClass">Drift: @DriftPercent.ToString("0.00")%</span>
+</div>
+
+@code {
+    private int ChangedBytes { get; set; }
+
+    private int ComparedBytes { get; set; }
+
+    private double DriftPercent { get; set; }
+
+    private string StatusClass => DriftPercent > 8 ? "metric-chip-critical" : DriftPercent > 3 ? "metric-chip-warning" : "metric-chip-ok";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var referenceBytes = await Http.GetByteArrayAsync("images/camera-reference.svg");
+        var liveBytes = await Http.GetByteArrayAsync("images/camera-live.svg");
+
+        ComparedBytes = Math.Max(referenceBytes.Length, liveBytes.Length);
+
+        var minLength = Math.Min(referenceBytes.Length, liveBytes.Length);
+        var mismatchCount = 0;
+
+        for (var index = 0; index < minLength; index++)
+        {
+            if (referenceBytes[index] != liveBytes[index])
+            {
+                mismatchCount++;
+            }
+        }
+
+        mismatchCount += Math.Abs(referenceBytes.Length - liveBytes.Length);
+
+        ChangedBytes = mismatchCount;
+        DriftPercent = ComparedBytes == 0 ? 0 : mismatchCount * 100d / ComparedBytes;
+    }
+}

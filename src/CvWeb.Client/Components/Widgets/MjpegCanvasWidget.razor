@@ -1,0 +1,57 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+
+<canvas id="@CanvasId" class="decoder-canvas" width="520" height="280" aria-label="MJPEG decoding canvas"></canvas>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Boundaries: @BoundaryCount</span>
+    <span class="metric-chip">Render FPS: @RenderFps</span>
+    <span class="metric-chip">Transport: multipart byte stream</span>
+</div>
+
+@code {
+    private readonly string CanvasId = $"mjpeg-canvas-{Guid.NewGuid():N}";
+    private DotNetObjectReference<MjpegCanvasWidget>? _dotNetReference;
+
+    private int BoundaryCount { get; set; }
+
+    private int RenderFps { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _dotNetReference = DotNetObjectReference.Create(this);
+        var baseUrl = (Configuration["DataPumpBaseUrl"] ?? "http://localhost:5094").TrimEnd('/');
+        var streamUrl = $"{baseUrl}/api/mjpeg/stream?fps=30";
+
+        await JS.InvokeVoidAsync("cvDashboard.startMjpegDecoder", CanvasId, streamUrl, _dotNetReference);
+    }
+
+    [JSInvokable]
+    public Task UpdateMjpegStats(int boundaries, int fps)
+    {
+        BoundaryCount = boundaries;
+        RenderFps = fps;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("cvDashboard.stopMjpegDecoder", CanvasId);
+        }
+        catch (JSException)
+        {
+            // Ignore teardown errors during route transitions.
+        }
+
+        _dotNetReference?.Dispose();
+    }
+}

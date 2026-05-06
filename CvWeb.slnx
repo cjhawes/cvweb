@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CvWeb.Client/CvWeb.Client.csproj" />
+    <Project Path="src/CvWeb.DataPump/CvWeb.DataPump.csproj" />
+  </Folder>
+</Solution>

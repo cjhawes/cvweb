@@ -1,0 +1,133 @@
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@inject IConfiguration Configuration
+
+<div class="widget-status-row">
+    <span class="status-dot @ConnectionClass"></span>
+    <span>@ConnectionLabel</span>
+</div>
+
+<svg class="telemetry-chart" viewBox="0 0 240 100" preserveAspectRatio="none" role="img" aria-label="Telemetry chart">
+    <polyline points="@SparklinePoints" class="telemetry-line" />
+</svg>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">CPU: @LatestCpu.ToString("0.0")%</span>
+    <span class="metric-chip">Memory: @LatestMemory.ToString("0.0")%</span>
+    <span class="metric-chip">Packet Loss: @LatestPacketLoss.ToString("0.00")%</span>
+</div>
+
+@code {
+    private const int MaxPoints = 40;
+    private readonly List<double> _cpuPoints = new();
+
+    private HubConnection? _hubConnection;
+
+    private double LatestCpu { get; set; }
+
+    private double LatestMemory { get; set; }
+
+    private double LatestPacketLoss { get; set; }
+
+    private string ConnectionLabel { get; set; } = "Connecting to stream...";
+
+    private string ConnectionClass => _hubConnection?.State switch
+    {
+        HubConnectionState.Connected => "status-ok",
+        HubConnectionState.Reconnecting => "status-warning",
+        _ => "status-critical"
+    };
+
+    private string SparklinePoints
+    {
+        get
+        {
+            if (_cpuPoints.Count == 0)
+            {
+                return "0,90 240,90";
+            }
+
+            var step = _cpuPoints.Count == 1 ? 0 : 240d / (_cpuPoints.Count - 1);
+            var points = _cpuPoints.Select((value, index) => $"{index * step:0.##},{100 - value:0.##}");
+            return string.Join(" ", points);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var baseUrl = (Configuration["DataPumpBaseUrl"] ?? "http://localhost:5094").TrimEnd('/');
+        var hubUrl = $"{baseUrl}/hubs/telemetry";
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(hubUrl)
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<TelemetrySignal>("telemetry", async signal =>
+        {
+            await InvokeAsync(() =>
+            {
+                LatestCpu = signal.CpuLoadPercent;
+                LatestMemory = signal.MemoryLoadPercent;
+                LatestPacketLoss = signal.PacketLossPercent;
+
+                _cpuPoints.Add(LatestCpu);
+                if (_cpuPoints.Count > MaxPoints)
+                {
+                    _cpuPoints.RemoveAt(0);
+                }
+
+                ConnectionLabel = $"Live stream: {signal.Node} @ {signal.Timestamp:HH:mm:ss}";
+                StateHasChanged();
+            });
+        });
+
+        _hubConnection.Reconnecting += _ =>
+        {
+            ConnectionLabel = "Reconnecting stream...";
+            StateHasChanged();
+            return Task.CompletedTask;
+        };
+
+        _hubConnection.Reconnected += _ =>
+        {
+            ConnectionLabel = "Stream reconnected";
+            StateHasChanged();
+            return Task.CompletedTask;
+        };
+
+        _hubConnection.Closed += _ =>
+        {
+            ConnectionLabel = "Stream offline";
+            StateHasChanged();
+            return Task.CompletedTask;
+        };
+
+        try
+        {
+            await _hubConnection.StartAsync();
+            ConnectionLabel = "Live stream connected";
+        }
+        catch
+        {
+            ConnectionLabel = "Unable to connect telemetry stream";
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+
+    private sealed record TelemetrySignal(
+        string Node,
+        DateTimeOffset Timestamp,
+        double CpuLoadPercent,
+        double MemoryLoadPercent,
+        double PacketLossPercent,
+        int ActiveStreams,
+        int AlertLevel);
+}

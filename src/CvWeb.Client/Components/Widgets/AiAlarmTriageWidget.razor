@@ -1,0 +1,148 @@
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@inject IConfiguration Configuration
+
+<div class="widget-status-row">
+    <span class="status-dot @StatusClass"></span>
+    <span>Local model: @ModelState</span>
+</div>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Latest Score: @LatestScore.ToString("0.0")</span>
+    <span class="metric-chip">Priority Alerts: @Alerts.Count</span>
+</div>
+
+<ul class="alert-feed">
+    @if (Alerts.Count == 0)
+    {
+        <li class="alert-row">No priority alerts yet.</li>
+    }
+    else
+    {
+        @foreach (var alert in Alerts)
+        {
+            <li class="alert-row @alert.PriorityClass">
+                <span>@alert.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                <strong>@alert.Priority</strong>
+                <span>@alert.Message</span>
+            </li>
+        }
+    }
+</ul>
+
+@code {
+    private readonly List<AlertItem> Alerts = new();
+
+    private HubConnection? _hubConnection;
+
+    private double LatestScore { get; set; }
+
+    private string ModelState { get; set; } = "warming up";
+
+    private string StatusClass => ModelState switch
+    {
+        "active" => "status-ok",
+        "degraded" => "status-warning",
+        _ => "status-critical"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var baseUrl = (Configuration["DataPumpBaseUrl"] ?? "http://localhost:5094").TrimEnd('/');
+        var hubUrl = $"{baseUrl}/hubs/telemetry";
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(hubUrl)
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<TelemetrySignal>("telemetry", async signal =>
+        {
+            await InvokeAsync(() =>
+            {
+                LatestScore = ScoreSignal(signal);
+                ModelState = "active";
+
+                if (LatestScore < 58)
+                {
+                    StateHasChanged();
+                    return;
+                }
+
+                var priority = LatestScore >= 84 ? "P1" : LatestScore >= 72 ? "P2" : "P3";
+                var priorityClass = priority == "P1" ? "alert-critical" : priority == "P2" ? "alert-warning" : "alert-info";
+
+                Alerts.Insert(0, new AlertItem(
+                    signal.Timestamp,
+                    priority,
+                    priorityClass,
+                    $"{signal.Node} CPU {signal.CpuLoadPercent:0.0}% | Packet Loss {signal.PacketLossPercent:0.00}%"));
+
+                if (Alerts.Count > 6)
+                {
+                    Alerts.RemoveAt(Alerts.Count - 1);
+                }
+
+                StateHasChanged();
+            });
+        });
+
+        _hubConnection.Reconnecting += _ =>
+        {
+            ModelState = "degraded";
+            StateHasChanged();
+            return Task.CompletedTask;
+        };
+
+        _hubConnection.Closed += _ =>
+        {
+            ModelState = "offline";
+            StateHasChanged();
+            return Task.CompletedTask;
+        };
+
+        try
+        {
+            await _hubConnection.StartAsync();
+            ModelState = "active";
+        }
+        catch
+        {
+            ModelState = "offline";
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+
+    private static double ScoreSignal(TelemetrySignal signal)
+    {
+        var normalizedCpu = signal.CpuLoadPercent / 100d;
+        var normalizedMemory = signal.MemoryLoadPercent / 100d;
+        var normalizedPacketLoss = Math.Min(signal.PacketLossPercent / 2d, 1);
+        var normalizedActiveStreams = Math.Min(signal.ActiveStreams / 50d, 1);
+
+        var weighted = normalizedCpu * 0.33
+                     + normalizedMemory * 0.19
+                     + normalizedPacketLoss * 0.38
+                     + normalizedActiveStreams * 0.10;
+
+        return weighted * 100;
+    }
+
+    private sealed record AlertItem(DateTimeOffset Timestamp, string Priority, string PriorityClass, string Message);
+
+    private sealed record TelemetrySignal(
+        string Node,
+        DateTimeOffset Timestamp,
+        double CpuLoadPercent,
+        double MemoryLoadPercent,
+        double PacketLossPercent,
+        int ActiveStreams,
+        int AlertLevel);
+}

@@ -1,0 +1,38 @@
+Connor Hawes
+Senior Software Engineer
+177 Blaby Road, Enderby, Leicester, LE19 2AR | +44 07398495797 | cjhawes.cs@gmail.com
+Summary
+A Senior Software Engineer with 7+ years of experience: architecting and delivering scalable, high-performance backend services and applications. Proven by leading the migration of two monolithic systems to modern microservice architectures using .NET. Alongside mentoring whole engineering teams and driving the adoption of Scrum best practices to build scalable, maintainable, and impactful software.
+Technical
+Skills
+Languages & Frameworks:
+ .NET C#, Angular, TypeScript, SQL, Python
+Architecture & Concepts:
+ Microservice Architecture, API Design, Scrum
+Tools & Platforms:
+ Azure DevOps, Git, Docker
+Experience
+Senior Software Development Engineer
+ | Telent | 
+June 2023 - Present
+Architected and led the migration of a monolithic application to a distributed microservice architecture, improving system scalability and enabling parallel development. Increasing system sensor capability from 10000 to 100000.
+Mentored and provided technical leadership to a 13 person team, establishing best practices for code quality, testing, and system design.
+Championed Scrum methodologies to reorganise the team into two focused workstreams, increasing development velocity and the predictability of software releases.
+Software Development Engineer
+ | Telent | 
+Sep 2020 - June 2023
+Designed and built a high performance software centric decoder for processing real-time RTSP video streams, demonstrating expertise in building efficient, low-latency software. Hit a technical requirement of <150ms glass to glass.
+Achieved subject matter expertise across multiple core products, driving a strategic upgrade initiative to migrate legacy applications to modern .NET and Angular versions.
+Continuously reviewed and improved the architecture of existing products, enhancing performance, stability, and maintainability.
+Graduate Software Development Engineer
+ | Telent | 
+Sep 2018 - Sep 2020
+Ensured high levels of product stability and customer satisfaction by efficiently resolving complex bugs and support requests across the application ecosystem.
+Awarded a Gold STEM contribution award for meaningful contributions to Telent's ambassador program.
+Education & Certifications
+BSc (Hons) Computer Information Systems, 1st Class
+ | Bangor University | 
+Graduated July 2018
+Professional Scrum Master I
+ | Scrum.org | 
+Nov 2021

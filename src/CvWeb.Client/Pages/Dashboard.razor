@@ -1,0 +1,93 @@
+@page "/dashboard"
+@page "/control-room"
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<PageTitle>Control Room Dashboard</PageTitle>
+
+<main class="dashboard-shell cv-shell">
+    <canvas id="particle-canvas" class="particle-canvas" aria-hidden="true"></canvas>
+    <div class="mesh-overlay" aria-hidden="true"></div>
+
+    <header class="dashboard-header section" data-animate="fade-up">
+        <p class="kicker">Tier 2 Live Technical Sandbox</p>
+        <h1>Control Room Dashboard</h1>
+        <p class="lede">
+            Five synthetic projects running concurrently to demonstrate browser-native C#, real-time data handling,
+            stream parsing, triage automation, and WebRTC diagnostics.
+        </p>
+        <NavLink class="terminal-cta terminal-cta-compact" href="/">
+            <span class="prompt">&lt;</span>
+            <span>Back to Mission Brief</span>
+        </NavLink>
+    </header>
+
+    <section class="widget-grid section">
+        <WidgetCard Title="Widget 1: WASM Image Diff"
+                    Challenge="Physical camera drift is subtle and can hide in long-running deployments."
+                    Solution="Pre-loaded reference and live captures are compared in-browser at the byte level to estimate drift quickly."
+                    Stack="C#, Blazor WASM"
+                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/ImageDiffWidget.razor">
+            <ImageDiffWidget />
+        </WidgetCard>
+
+        <WidgetCard Title="Widget 2: SignalR IoT Telemetry"
+                    Challenge="Polling introduces latency and misses micro-spikes during operational incidents."
+                    Solution="A SignalR stream pushes aggressive telemetry updates into a live sparkline and metric panel."
+                    Stack="C#, Blazor WASM, SignalR"
+                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/SignalRTelemetryWidget.razor">
+            <SignalRTelemetryWidget />
+        </WidgetCard>
+
+        <WidgetCard Title="Widget 3: MJPEG Canvas Decoder"
+                    Challenge="Standard video elements hide frame-boundary behavior and payload rhythm under network load."
+                    Solution="A raw multipart byte stream is read directly and decoded into frame boundaries rendered at 30fps on canvas."
+                    Stack="C#, Blazor WASM, JS Interop, Canvas"
+                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/MjpegCanvasWidget.razor">
+            <MjpegCanvasWidget />
+        </WidgetCard>
+
+        <WidgetCard Title="Widget 4: AI Alarm Triage"
+                    Challenge="Noisy telemetry floods operators with low-value alerts and slows response time."
+                    Solution="A browser-local scoring model classifies incoming telemetry into priority alerts and surfaces only what matters."
+                    Stack="C#, Blazor WASM"
+                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/AiAlarmTriageWidget.razor">
+            <AiAlarmTriageWidget />
+        </WidgetCard>
+
+        <WidgetCard Title="Widget 5: WebRTC Diagnostics"
+                    Challenge="Connection quality changes faster than static health checks can capture."
+                    Solution="A peer connection loop runs continuous diagnostics and calculates live frame health from RTC stats."
+                    Stack="C#, Blazor WASM, JS Interop, WebRTC"
+                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/WebRtcDiagnosticsWidget.razor">
+            <WebRtcDiagnosticsWidget />
+        </WidgetCard>
+    </section>
+</main>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("cvLanding.init");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("cvDashboard.disposeAll");
+            await JS.InvokeVoidAsync("cvLanding.dispose");
+        }
+        catch (JSException)
+        {
+            // Ignore teardown errors during route transitions.
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore disposal calls when JS runtime is unavailable.
+        }
+    }
+}
