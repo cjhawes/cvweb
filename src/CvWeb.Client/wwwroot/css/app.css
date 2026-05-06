@@ -394,6 +394,7 @@ a {
 }
 
 .widget-card {
+    position: relative;
     perspective: 1500px;
     min-height: 360px;
 }
@@ -402,14 +403,7 @@ a {
     position: relative;
     min-height: 360px;
     width: 100%;
-    transform-style: preserve-3d;
-    -webkit-transform-style: preserve-3d;
-    will-change: transform;
-    transition: transform 0.72s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.widget-card.is-flipped .widget-card-inner {
-    transform: rotateY(180deg);
+    isolation: isolate;
 }
 
 .widget-face {
@@ -421,43 +415,48 @@ a {
     box-shadow: 0 16px 42px rgba(0, 0, 0, 0.34);
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
-    transform-style: preserve-3d;
-    -webkit-transform-style: preserve-3d;
     overflow: hidden;
+    will-change: transform, opacity;
+    transition: transform 0.62s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.28s ease;
 }
 
 .widget-front,
 .widget-back {
     display: flex;
     flex-direction: column;
+    transform-origin: center center;
 }
 
 .widget-front {
     transform: rotateY(0deg);
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    z-index: 2;
 }
 
 .widget-back {
     transform: rotateY(180deg);
-}
-
-.widget-card:not(.is-flipped) .widget-front {
-    visibility: visible;
-    pointer-events: auto;
-}
-
-.widget-card:not(.is-flipped) .widget-back {
+    opacity: 0;
     visibility: hidden;
     pointer-events: none;
+    z-index: 1;
 }
 
 .widget-card.is-flipped .widget-front {
+    transform: rotateY(-180deg);
+    opacity: 0;
     visibility: hidden;
     pointer-events: none;
+    z-index: 1;
 }
 
 .widget-card.is-flipped .widget-back {
+    transform: rotateY(0deg);
+    opacity: 1;
     visibility: visible;
     pointer-events: auto;
+    z-index: 2;
 }
 
 .widget-header {
@@ -479,21 +478,34 @@ a {
 }
 
 .flip-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.72rem;
     border: 1px solid rgba(255, 127, 50, 0.42);
     border-radius: 999px;
-    background: rgba(8, 15, 33, 0.92);
+    background: linear-gradient(180deg, rgba(18, 29, 58, 0.94), rgba(8, 15, 33, 0.94));
     color: #d9e7ff;
     min-width: 3.1rem;
     height: 2rem;
     font-family: "Consolas", "Cascadia Mono", monospace;
     font-size: 0.84rem;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
     cursor: pointer;
-    transition: border-color 0.2s ease, transform 0.2s ease;
+    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .flip-toggle:hover {
     border-color: rgba(45, 246, 255, 0.78);
     transform: translateY(-1px);
+    box-shadow: 0 0 14px rgba(45, 246, 255, 0.24);
+}
+
+.flip-toggle:focus-visible {
+    outline: 2px solid rgba(45, 246, 255, 0.8);
+    outline-offset: 2px;
 }
 
 .widget-content {
