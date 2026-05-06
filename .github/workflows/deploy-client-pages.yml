@@ -38,7 +38,7 @@ jobs:
         run: dotnet restore src/CvWeb.Client/CvWeb.Client.csproj --configfile NuGet.Config
 
       - name: Publish client
-        run: dotnet publish src/CvWeb.Client/CvWeb.Client.csproj --configuration Release --output release/wwwroot
+        run: dotnet publish src/CvWeb.Client/CvWeb.Client.csproj --configuration Release --output release
 
       - name: Rewrite base href for project pages
         shell: bash
