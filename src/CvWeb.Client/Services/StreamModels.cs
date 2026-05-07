@@ -14,6 +14,11 @@ public sealed record MjpegStreamSample(
     int RenderFps,
     DateTimeOffset Timestamp);
 
+public sealed record MjpegByteChunk(
+    long Sequence,
+    DateTimeOffset Timestamp,
+    byte[] ChunkBytes);
+
 public sealed record WebRtcTrackEnvelope(
     string Profile,
     IReadOnlyList<WebRtcTrack> Tracks);

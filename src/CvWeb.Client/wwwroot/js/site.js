@@ -240,6 +240,16 @@
         return occurrences;
     }
 
+    function decodeBase64ToUint8Array(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+
+        return bytes;
+    }
+
     function scaleCanvas(canvas, context) {
         const rect = canvas.getBoundingClientRect();
         const ratio = window.devicePixelRatio || 1;
@@ -1165,11 +1175,99 @@ void main() {
             cancelAnimationFrame(state.animationFrame);
         }
 
+        if (state.fpsInterval) {
+            clearInterval(state.fpsInterval);
+        }
+
         if (state.resizeHandler) {
             window.removeEventListener("resize", state.resizeHandler);
         }
 
         dashboardState.mjpegDecoders.delete(canvasId);
+    }
+
+    function initMjpegDecoderCanvas(canvasId, dotNetRef = null) {
+        stopMjpegDecoder(canvasId);
+
+        const canvas = document.getElementById(canvasId);
+        if (!(canvas instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        const context = canvas.getContext("2d");
+        if (!context) {
+            return;
+        }
+
+        const state = {
+            canvas,
+            context,
+            dotNetRef,
+            running: true,
+            boundaries: 0,
+            renderFps: 0,
+            frameCounter: 0,
+            lastFpsMeasure: performance.now(),
+            animationFrame: null,
+            resizeHandler: null,
+            fpsInterval: null,
+            hasRealFrames: false
+        };
+
+        state.resizeHandler = () => scaleCanvas(canvas, context);
+        window.addEventListener("resize", state.resizeHandler);
+        state.resizeHandler();
+
+        state.fpsInterval = setInterval(() => {
+            const now = performance.now();
+            const elapsed = (now - state.lastFpsMeasure) / 1000;
+            if (elapsed > 0) {
+                state.renderFps = state.frameCounter / elapsed;
+                state.frameCounter = 0;
+                state.lastFpsMeasure = now;
+            }
+            if (state.dotNetRef) {
+                state.dotNetRef.invokeMethodAsync("UpdateMjpegStats", state.boundaries, Math.round(state.renderFps)).catch(() => {
+                    // Ignore callback failures during component teardown.
+                });
+            }
+        }, 1000);
+
+        dashboardState.mjpegDecoders.set(canvasId, state);
+    }
+
+    async function drawMjpegFrameBytes(canvasId, frameBase64) {
+        const state = dashboardState.mjpegDecoders.get(canvasId);
+        if (!state || typeof frameBase64 !== "string" || frameBase64.length === 0) {
+            return;
+        }
+
+        if (!state.hasRealFrames) {
+            state.hasRealFrames = true;
+            if (state.animationFrame) {
+                cancelAnimationFrame(state.animationFrame);
+                state.animationFrame = null;
+            }
+        }
+
+        try {
+            const bytes = decodeBase64ToUint8Array(frameBase64);
+            const blob = new Blob([bytes], { type: "image/jpeg" });
+            const bitmap = await createImageBitmap(blob);
+
+            const ctx = state.context;
+            const width = state.canvas.clientWidth;
+            const height = state.canvas.clientHeight;
+
+            ctx.clearRect(0, 0, width, height);
+            ctx.drawImage(bitmap, 0, 0, width, height);
+            bitmap.close();
+
+            state.frameCounter += 1;
+            state.boundaries += 1;
+        } catch {
+            // Ignore malformed frame bytes and transient decode failures.
+        }
     }
 
     async function startWebRtcDiagnostics(videoId, dotNetRef) {
@@ -1412,6 +1510,8 @@ void main() {
         startGpuAlignmentChecker,
         stopGpuAlignmentChecker,
         startMjpegDecoder,
+        initMjpegDecoderCanvas,
+        drawMjpegFrameBytes,
         setMjpegBoundaryCount,
         stopMjpegDecoder,
         startTelemetryGrid,

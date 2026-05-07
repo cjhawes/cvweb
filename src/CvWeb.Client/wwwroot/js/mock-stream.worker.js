@@ -3,6 +3,7 @@ const state = {
     telemetryTimer: null,
     telemetryGridTimer: null,
     mjpegTimer: null,
+    mjpegByteTimer: null,
     boundaryCount: 0,
     node: "edge-gateway-a",
     telemetryGrid: {
@@ -10,6 +11,11 @@ const state = {
         height: 32,
         sensorCount: 32 * 32,
         sequence: 0
+    },
+    mjpegByte: {
+        sequence: 0,
+        frameNumber: 0,
+        boundary: "--frame"
     }
 };
 
@@ -24,6 +30,86 @@ function round(value, digits) {
 
 function postMessageEnvelope(type, payload) {
     self.postMessage({ type, payload });
+}
+
+function concatenateBytes(parts) {
+    let totalLength = 0;
+    for (const part of parts) {
+        totalLength += part.length;
+    }
+
+    const merged = new Uint8Array(totalLength);
+    let offset = 0;
+
+    for (const part of parts) {
+        merged.set(part, offset);
+        offset += part.length;
+    }
+
+    return merged;
+}
+
+function encodeAscii(text) {
+    return new TextEncoder().encode(text);
+}
+
+async function buildValidJpegBytes(frameNumber) {
+    const width = 160;
+    const height = 90;
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+
+    const imageData = ctx.createImageData(width, height);
+    for (let index = 0; index < width * height; index += 1) {
+        const x = index % width;
+        const y = Math.floor(index / width);
+        const wave = Math.sin((x + frameNumber * 3.4) / 10) + Math.cos((y + frameNumber * 2.1) / 7);
+        const normalized = clamp((wave + 2) / 4, 0, 1);
+        const value = Math.floor(normalized * 255);
+        const offset = index * 4;
+        imageData.data[offset] = value;
+        imageData.data[offset + 1] = value;
+        imageData.data[offset + 2] = value;
+        imageData.data[offset + 3] = 255;
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.75 });
+    return new Uint8Array(await blob.arrayBuffer());
+}
+
+async function buildMultipartFrame(frameNumber) {
+    const jpeg = await buildValidJpegBytes(frameNumber);
+    const boundary = state.mjpegByte.boundary;
+    const headerText = `${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n`;
+    const trailerText = "\r\n";
+
+    return concatenateBytes([
+        encodeAscii(headerText),
+        jpeg,
+        encodeAscii(trailerText)
+    ]);
+}
+
+async function emitFragmentedMultipartFrame(nowMs) {
+    const frameBytes = await buildMultipartFrame(state.mjpegByte.frameNumber);
+    state.mjpegByte.frameNumber += 1;
+
+    let offset = 0;
+    while (offset < frameBytes.length) {
+        const remaining = frameBytes.length - offset;
+        const chunkSize = Math.min(remaining, 64 + Math.floor(Math.random() * 192));
+        const slice = frameBytes.slice(offset, offset + chunkSize);
+        offset += chunkSize;
+
+        postMessageEnvelope("mjpeg-byte-chunk", {
+            sequence: state.mjpegByte.sequence,
+            timestamp: new Date(nowMs).toISOString(),
+            chunkBase64: btoa(String.fromCharCode(...slice))
+        });
+
+        state.mjpegByte.sequence += 1;
+    }
 }
 
 function buildTelemetry(nowMs) {
@@ -220,6 +306,8 @@ function startWorker() {
     state.running = true;
     state.boundaryCount = 0;
     state.telemetryGrid.sequence = 0;
+    state.mjpegByte.sequence = 0;
+    state.mjpegByte.frameNumber = 0;
 
     emitProfiles();
 
@@ -240,6 +328,12 @@ function startWorker() {
             timestamp: new Date().toISOString()
         });
     }, 100);
+
+    state.mjpegByteTimer = self.setInterval(() => {
+        emitFragmentedMultipartFrame(Date.now()).catch(() => {
+            // Ignore transient frame generation failures.
+        });
+    }, 1000 / 30);
 }
 
 function stopWorker() {
@@ -262,6 +356,11 @@ function stopWorker() {
     if (state.mjpegTimer !== null) {
         self.clearInterval(state.mjpegTimer);
         state.mjpegTimer = null;
+    }
+
+    if (state.mjpegByteTimer !== null) {
+        self.clearInterval(state.mjpegByteTimer);
+        state.mjpegByteTimer = null;
     }
 }
 

@@ -30,13 +30,23 @@ public sealed class MockStreamService : IMockStreamService
             FullMode = BoundedChannelFullMode.DropOldest
         });
 
+    private readonly Channel<MjpegByteChunk> _mjpegByteIngress = Channel.CreateBounded<MjpegByteChunk>(
+        new BoundedChannelOptions(1024)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
     private readonly List<Channel<TelemetrySignal>> _telemetrySubscribers = [];
     private readonly List<Channel<MjpegStreamSample>> _mjpegSubscribers = [];
+    private readonly List<Channel<MjpegByteChunk>> _mjpegByteSubscribers = [];
     private readonly Dictionary<string, WebRtcTrackEnvelope> _webrtcProfiles = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _fanoutCts = new();
     private readonly Task _telemetryFanoutTask;
     private readonly Task _mjpegFanoutTask;
+    private readonly Task _mjpegByteFanoutTask;
 
     private DotNetObjectReference<MockStreamService>? _dotNetReference;
     private bool _isStarted;
@@ -47,6 +57,7 @@ public sealed class MockStreamService : IMockStreamService
 
         _telemetryFanoutTask = Task.Run(() => TelemetryFanOutAsync(_fanoutCts.Token));
         _mjpegFanoutTask = Task.Run(() => MjpegFanOutAsync(_fanoutCts.Token));
+        _mjpegByteFanoutTask = Task.Run(() => MjpegByteFanOutAsync(_fanoutCts.Token));
     }
 
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
@@ -136,6 +147,29 @@ public sealed class MockStreamService : IMockStreamService
         return channel.Reader;
     }
 
+    public ChannelReader<MjpegByteChunk> SubscribeMjpegByteChunks(CancellationToken cancellationToken = default)
+    {
+        var channel = Channel.CreateBounded<MjpegByteChunk>(
+            new BoundedChannelOptions(256)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropOldest
+            });
+
+        lock (_sync)
+        {
+            _mjpegByteSubscribers.Add(channel);
+        }
+
+        if (cancellationToken.CanBeCanceled)
+        {
+            _ = RemoveMjpegByteSubscriberOnCancelAsync(channel, cancellationToken);
+        }
+
+        return channel.Reader;
+    }
+
     public ValueTask<WebRtcTrackEnvelope> GetWebRtcTrackProfileAsync(string profile, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -185,6 +219,19 @@ public sealed class MockStreamService : IMockStreamService
 
                     break;
                 }
+                case "mjpeg-byte-chunk":
+                {
+                    var envelope = JsonSerializer.Deserialize<MjpegByteChunkEnvelope>(payloadJson, JsonOptions);
+                    if (envelope is not null && TryDecodeBase64(envelope.ChunkBase64, out var chunkBytes))
+                    {
+                        _mjpegByteIngress.Writer.TryWrite(new MjpegByteChunk(
+                            envelope.Sequence,
+                            envelope.Timestamp,
+                            chunkBytes));
+                    }
+
+                    break;
+                }
                 case "webrtc-profile":
                 {
                     var envelope = JsonSerializer.Deserialize<WebRtcTrackEnvelope>(payloadJson, JsonOptions);
@@ -227,14 +274,17 @@ public sealed class MockStreamService : IMockStreamService
 
         _telemetryIngress.Writer.TryComplete();
         _mjpegIngress.Writer.TryComplete();
+        _mjpegByteIngress.Writer.TryComplete();
 
         CompleteSubscribers(_telemetrySubscribers);
         CompleteSubscribers(_mjpegSubscribers);
+        CompleteSubscribers(_mjpegByteSubscribers);
 
         try
         {
             await _telemetryFanoutTask;
             await _mjpegFanoutTask;
+            await _mjpegByteFanoutTask;
         }
         catch (OperationCanceledException)
         {
@@ -288,6 +338,23 @@ public sealed class MockStreamService : IMockStreamService
         }
     }
 
+    private async Task RemoveMjpegByteSubscriberOnCancelAsync(Channel<MjpegByteChunk> channel, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            lock (_sync)
+            {
+                _mjpegByteSubscribers.Remove(channel);
+            }
+
+            channel.Writer.TryComplete();
+        }
+    }
+
     private async Task TelemetryFanOutAsync(CancellationToken cancellationToken)
     {
         await foreach (var signal in _telemetryIngress.Reader.ReadAllAsync(cancellationToken))
@@ -321,6 +388,47 @@ public sealed class MockStreamService : IMockStreamService
             }
         }
     }
+
+    private async Task MjpegByteFanOutAsync(CancellationToken cancellationToken)
+    {
+        await foreach (var sample in _mjpegByteIngress.Reader.ReadAllAsync(cancellationToken))
+        {
+            Channel<MjpegByteChunk>[] subscribers;
+            lock (_sync)
+            {
+                subscribers = [.. _mjpegByteSubscribers];
+            }
+
+            foreach (var subscriber in subscribers)
+            {
+                _ = subscriber.Writer.TryWrite(sample);
+            }
+        }
+    }
+
+    private static bool TryDecodeBase64(string? payload, out byte[] bytes)
+    {
+        bytes = [];
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return false;
+        }
+
+        try
+        {
+            bytes = Convert.FromBase64String(payload);
+            return bytes.Length > 0;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private sealed record MjpegByteChunkEnvelope(
+        long Sequence,
+        DateTimeOffset Timestamp,
+        string ChunkBase64);
 
     private static WebRtcTrackEnvelope BuildFallbackProfile(string profile)
     {

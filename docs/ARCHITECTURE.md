@@ -108,3 +108,47 @@ Implement a high-frequency telemetry engine widget that simulates 1,024 IoT sens
 - Circular buffer memory is bounded and pre-allocated to avoid allocation churn under sustained 60Hz load.
 - Rendering uses Canvas pixel buffers instead of DOM node updates, keeping UI thread work predictable.
 - Existing dashboard routing and CSS grid behavior are preserved.
+
+## Phase 4: Software MJPEG Decoder Widget
+
+### Objective
+Implement a browser-local MJPEG decoder that ingests raw multipart HTTP byte chunks from the worker, slices frame boundaries in Blazor, and paints decoded frames to Canvas at 30fps without using video tags.
+
+### Key Decisions
+- Added `MjpegDecoder` widget as a `.razor` + `.razor.cs` pair to separate UI shell from byte-stream decode orchestration.
+- Replaced dashboard Project 03 rendering component with `MjpegDecoder` while preserving card layout and flip-card metadata flow.
+- Extended `IMockStreamService` and `MockStreamService` with `MjpegByteChunk` transport and subscription APIs.
+- Extended worker stream simulation (`mock-stream.worker.js`) to emit fragmented multipart MJPEG byte chunks (`mjpeg-byte-chunk`) with sequence/timestamp metadata.
+
+### Byte-Slicing Strategy
+- Worker emits multipart payload segments with structure:
+  - boundary line (`--frame`)
+  - headers (`Content-Type`, `Content-Length`)
+  - header terminator (`\r\n\r\n`)
+  - synthetic JPEG bytes
+  - trailing CRLF
+- Decoder keeps a carry buffer for partial chunks and appends each incoming chunk.
+- Boundary parser scans byte spans for:
+  1. boundary marker
+  2. header terminator
+  3. content-length value
+  4. full frame payload availability
+- Complete frame payloads are enqueued; residual tail bytes are retained in carry for the next chunk.
+
+### Synchronization Strategy
+- Ingest loop: consumes chunk channel continuously and extracts complete frames as they become available.
+- Render loop: fixed cadence (~30fps) to draw one latest frame to canvas.
+- Frame queue is bounded (max depth 4) to prevent UI stall under bursty chunk ingress.
+- When queue overflows, stale frames are dropped (drop-oldest) and widget status degrades until queue pressure stabilizes.
+
+### Runtime Flow
+1. Dashboard starts `MockStreamService` and worker.
+2. Worker emits `mjpeg-byte-chunk` envelopes with base64-encoded byte slices.
+3. `MockStreamService` decodes base64 and fans out `MjpegByteChunk` objects over bounded channels.
+4. `MjpegDecoder` parses multipart boundaries in C# and enqueues full frame payloads.
+5. Render loop calls JS interop draw routine to decode frame bytes and paint onto canvas.
+
+### Performance Notes
+- Byte chunk fanout uses bounded channels with `DropOldest` backpressure semantics.
+- Decoder parsing is span-oriented with carry buffer reuse to avoid unbounded stream growth.
+- Rendering is canvas-based and avoids DOM node churn or native `<video>` playback overhead.

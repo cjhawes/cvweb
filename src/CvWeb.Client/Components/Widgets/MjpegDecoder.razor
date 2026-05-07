@@ -1,0 +1,30 @@
+@* FlipCard Documentation
+   - Front face ingests raw multipart MJPEG byte chunks and software-decodes frame boundaries in Blazor.
+   - Back face challenge/solution/stack copy remains owned by WidgetCard metadata in Dashboard.
+   - This component keeps rendering in canvas and avoids native HTML5 video elements.
+*@
+
+<div class="widget-status-row">
+    <span class="status-dot @StatusClass"></span>
+    <span>@StatusLabel</span>
+</div>
+
+<canvas id="@CanvasId"
+        class="decoder-canvas"
+        width="520"
+        height="280"
+        aria-label="Software-decoded MJPEG canvas stream"></canvas>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Chunks: @ChunkCount.ToString("N0")</span>
+    <span class="metric-chip">Boundaries: @BoundaryCount.ToString("N0")</span>
+    <span class="metric-chip">Frame Queue: @QueuedFrames.ToString("N0")</span>
+    <span class="metric-chip">Dropped: @DroppedFrames.ToString("N0")</span>
+</div>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Decoded: @DecodedFrames.ToString("N0")</span>
+    <span class="metric-chip">Rendered: @RenderedFrames.ToString("N0")</span>
+    <span class="metric-chip">Render FPS: @RenderFps.ToString("0.0")</span>
+    <span class="metric-chip">Transport: multipart byte stream</span>
+</div>
