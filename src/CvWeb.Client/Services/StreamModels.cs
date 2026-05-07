@@ -9,6 +9,10 @@ public sealed record TelemetrySignal(
     int ActiveStreams,
     int AlertLevel);
 
+public sealed record TelemetryJsonSample(
+    DateTimeOffset ReceivedAt,
+    string PayloadJson);
+
 public sealed record MjpegStreamSample(
     int BoundaryCount,
     int RenderFps,

@@ -22,6 +22,14 @@ public sealed class MockStreamService : IMockStreamService
             FullMode = BoundedChannelFullMode.DropOldest
         });
 
+    private readonly Channel<TelemetryJsonSample> _telemetryJsonIngress = Channel.CreateBounded<TelemetryJsonSample>(
+        new BoundedChannelOptions(512)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
     private readonly Channel<MjpegStreamSample> _mjpegIngress = Channel.CreateBounded<MjpegStreamSample>(
         new BoundedChannelOptions(512)
         {
@@ -39,12 +47,14 @@ public sealed class MockStreamService : IMockStreamService
         });
 
     private readonly List<Channel<TelemetrySignal>> _telemetrySubscribers = [];
+    private readonly List<Channel<TelemetryJsonSample>> _telemetryJsonSubscribers = [];
     private readonly List<Channel<MjpegStreamSample>> _mjpegSubscribers = [];
     private readonly List<Channel<MjpegByteChunk>> _mjpegByteSubscribers = [];
     private readonly Dictionary<string, WebRtcTrackEnvelope> _webrtcProfiles = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _fanoutCts = new();
     private readonly Task _telemetryFanoutTask;
+    private readonly Task _telemetryJsonFanoutTask;
     private readonly Task _mjpegFanoutTask;
     private readonly Task _mjpegByteFanoutTask;
 
@@ -56,6 +66,7 @@ public sealed class MockStreamService : IMockStreamService
         _js = js;
 
         _telemetryFanoutTask = Task.Run(() => TelemetryFanOutAsync(_fanoutCts.Token));
+        _telemetryJsonFanoutTask = Task.Run(() => TelemetryJsonFanOutAsync(_fanoutCts.Token));
         _mjpegFanoutTask = Task.Run(() => MjpegFanOutAsync(_fanoutCts.Token));
         _mjpegByteFanoutTask = Task.Run(() => MjpegByteFanOutAsync(_fanoutCts.Token));
     }
@@ -119,6 +130,29 @@ public sealed class MockStreamService : IMockStreamService
         if (cancellationToken.CanBeCanceled)
         {
             _ = RemoveTelemetrySubscriberOnCancelAsync(channel, cancellationToken);
+        }
+
+        return channel.Reader;
+    }
+
+    public ChannelReader<TelemetryJsonSample> SubscribeTelemetryJson(CancellationToken cancellationToken = default)
+    {
+        var channel = Channel.CreateBounded<TelemetryJsonSample>(
+            new BoundedChannelOptions(128)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropOldest
+            });
+
+        lock (_sync)
+        {
+            _telemetryJsonSubscribers.Add(channel);
+        }
+
+        if (cancellationToken.CanBeCanceled)
+        {
+            _ = RemoveTelemetryJsonSubscriberOnCancelAsync(channel, cancellationToken);
         }
 
         return channel.Reader;
@@ -201,6 +235,10 @@ public sealed class MockStreamService : IMockStreamService
             {
                 case "telemetry":
                 {
+                    _telemetryJsonIngress.Writer.TryWrite(new TelemetryJsonSample(
+                        DateTimeOffset.UtcNow,
+                        payloadJson));
+
                     var signal = JsonSerializer.Deserialize<TelemetrySignal>(payloadJson, JsonOptions);
                     if (signal is not null)
                     {
@@ -273,16 +311,19 @@ public sealed class MockStreamService : IMockStreamService
         _fanoutCts.Cancel();
 
         _telemetryIngress.Writer.TryComplete();
+        _telemetryJsonIngress.Writer.TryComplete();
         _mjpegIngress.Writer.TryComplete();
         _mjpegByteIngress.Writer.TryComplete();
 
         CompleteSubscribers(_telemetrySubscribers);
+        CompleteSubscribers(_telemetryJsonSubscribers);
         CompleteSubscribers(_mjpegSubscribers);
         CompleteSubscribers(_mjpegByteSubscribers);
 
         try
         {
             await _telemetryFanoutTask;
+            await _telemetryJsonFanoutTask;
             await _mjpegFanoutTask;
             await _mjpegByteFanoutTask;
         }
@@ -315,6 +356,23 @@ public sealed class MockStreamService : IMockStreamService
             lock (_sync)
             {
                 _telemetrySubscribers.Remove(channel);
+            }
+
+            channel.Writer.TryComplete();
+        }
+    }
+
+    private async Task RemoveTelemetryJsonSubscriberOnCancelAsync(Channel<TelemetryJsonSample> channel, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            lock (_sync)
+            {
+                _telemetryJsonSubscribers.Remove(channel);
             }
 
             channel.Writer.TryComplete();
@@ -368,6 +426,23 @@ public sealed class MockStreamService : IMockStreamService
             foreach (var subscriber in subscribers)
             {
                 _ = subscriber.Writer.TryWrite(signal);
+            }
+        }
+    }
+
+    private async Task TelemetryJsonFanOutAsync(CancellationToken cancellationToken)
+    {
+        await foreach (var sample in _telemetryJsonIngress.Reader.ReadAllAsync(cancellationToken))
+        {
+            Channel<TelemetryJsonSample>[] subscribers;
+            lock (_sync)
+            {
+                subscribers = [.. _telemetryJsonSubscribers];
+            }
+
+            foreach (var subscriber in subscribers)
+            {
+                _ = subscriber.Writer.TryWrite(sample);
             }
         }
     }

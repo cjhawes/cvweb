@@ -10,6 +10,8 @@ public interface IMockStreamService : IAsyncDisposable
 
     ChannelReader<TelemetrySignal> SubscribeTelemetry(CancellationToken cancellationToken = default);
 
+    ChannelReader<TelemetryJsonSample> SubscribeTelemetryJson(CancellationToken cancellationToken = default);
+
     ChannelReader<MjpegStreamSample> SubscribeMjpeg(CancellationToken cancellationToken = default);
 
     ChannelReader<MjpegByteChunk> SubscribeMjpegByteChunks(CancellationToken cancellationToken = default);

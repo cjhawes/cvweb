@@ -700,6 +700,20 @@ a {
     border-color: rgba(45, 246, 255, 0.5);
 }
 
+.priority-alert-feed .alert-row {
+    grid-template-columns: auto auto 1fr auto;
+}
+
+.alert-group-pill {
+    border-radius: 999px;
+    border: 1px solid rgba(45, 246, 255, 0.36);
+    background: rgba(6, 18, 36, 0.9);
+    padding: 0.1rem 0.45rem;
+    font-family: "Consolas", "Cascadia Mono", monospace;
+    font-size: 0.72rem;
+    color: #bfeeff;
+}
+
 .control-room {
     min-height: 100vh;
     display: grid;
