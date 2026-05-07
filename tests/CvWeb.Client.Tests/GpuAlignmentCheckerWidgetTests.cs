@@ -4,12 +4,21 @@ using CvWeb.Client.Components.Widgets;
 
 namespace CvWeb.Client.Tests;
 
-public sealed class GpuAlignmentCheckerWidgetTests
+public sealed class GpuAlignmentCheckerWidgetTests : IDisposable
 {
+    private readonly CultureInfo _originalCulture = CultureInfo.CurrentCulture;
+    private readonly CultureInfo _originalUICulture = CultureInfo.CurrentUICulture;
+
     public GpuAlignmentCheckerWidgetTests()
     {
         CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
+    }
+
+    public void Dispose()
+    {
+        CultureInfo.CurrentCulture = _originalCulture;
+        CultureInfo.CurrentUICulture = _originalUICulture;
     }
 
     [Fact]

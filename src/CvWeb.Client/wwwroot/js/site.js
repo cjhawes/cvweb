@@ -674,6 +674,7 @@ void main() {
 
             state.resizeHandler();
         } catch {
+            stopGpuAlignmentChecker(canvasId);
             if (dotNetRef) {
                 dotNetRef.invokeMethodAsync("UpdateGpuAlignmentFailure", "GPU comparison shader failed to execute.").catch(() => {
                     // Ignore callback failures during route transitions.
