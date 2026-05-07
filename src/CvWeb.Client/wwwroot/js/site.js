@@ -13,7 +13,9 @@
 
     const dashboardState = {
         mjpegDecoders: new Map(),
-        webrtcSessions: new Map()
+        webrtcSessions: new Map(),
+        mockWorker: null,
+        mockDotNetRef: null
     };
 
     function initLanding(ownerToken) {
@@ -244,7 +246,68 @@
         context.setTransform(ratio, 0, 0, ratio, 0, 0);
     }
 
-    async function startMjpegDecoder(canvasId, streamUrl, dotNetRef) {
+    function startMockStreamWorker(dotNetRef) {
+        stopMockStreamWorker();
+
+        const workerUrl = new URL("js/mock-stream.worker.js", document.baseURI);
+        const worker = new Worker(workerUrl, { type: "module" });
+
+        dashboardState.mockWorker = worker;
+        dashboardState.mockDotNetRef = dotNetRef;
+
+        worker.onmessage = (event) => {
+            if (!dashboardState.mockDotNetRef) {
+                return;
+            }
+
+            const envelope = event.data || {};
+            const messageType = typeof envelope.type === "string" ? envelope.type : "";
+            if (!messageType) {
+                return;
+            }
+
+            let payloadJson = "null";
+            try {
+                payloadJson = JSON.stringify(envelope.payload ?? null);
+            } catch {
+                payloadJson = "null";
+            }
+
+            dashboardState.mockDotNetRef.invokeMethodAsync("HandleWorkerMessage", messageType, payloadJson).catch(() => {
+                // Ignore callback failures during route transitions.
+            });
+        };
+
+        worker.onerror = () => {
+            if (!dashboardState.mockDotNetRef) {
+                return;
+            }
+
+            dashboardState.mockDotNetRef.invokeMethodAsync("HandleWorkerMessage", "worker-error", "null").catch(() => {
+                // Ignore callback failures during route transitions.
+            });
+        };
+
+        worker.postMessage({ type: "start" });
+    }
+
+    function stopMockStreamWorker() {
+        if (!dashboardState.mockWorker) {
+            return;
+        }
+
+        try {
+            dashboardState.mockWorker.postMessage({ type: "stop" });
+        } catch {
+            // Ignore stop races while worker is shutting down.
+        }
+
+        dashboardState.mockWorker.terminate();
+        dashboardState.mockWorker = null;
+        dashboardState.mockDotNetRef = null;
+    }
+
+    async function startMjpegDecoder(canvasId, streamUrl = "", dotNetRef = null) {
         stopMjpegDecoder(canvasId);
 
         const canvas = document.getElementById(canvasId);
@@ -262,7 +325,7 @@
             context,
             dotNetRef,
             streamUrl,
-            abortController: new AbortController(),
+            abortController: typeof streamUrl === "string" && streamUrl.length > 0 ? new AbortController() : null,
             running: true,
             boundaries: 0,
             renderFps: 0,
@@ -281,36 +344,38 @@
 
         drawMjpegFrame(state);
 
-        try {
-            const response = await fetch(streamUrl, {
-                cache: "no-store",
-                signal: state.abortController.signal
-            });
+        if (typeof streamUrl === "string" && streamUrl.length > 0) {
+            try {
+                const response = await fetch(streamUrl, {
+                    cache: "no-store",
+                    signal: state.abortController ? state.abortController.signal : undefined
+                });
 
-            if (!response.body) {
-                return;
-            }
-
-            const marker = new TextEncoder().encode("--frame");
-            const reader = response.body.getReader();
-            let carry = new Uint8Array(0);
-
-            while (state.running) {
-                const { done, value } = await reader.read();
-                if (done || !value) {
-                    break;
+                if (!response.body) {
+                    return;
                 }
 
-                const merged = concatUint8Arrays(carry, value);
-                const matches = countPatternOccurrences(merged, marker);
-                if (matches > 0) {
-                    state.boundaries += matches;
-                }
+                const marker = new TextEncoder().encode("--frame");
+                const reader = response.body.getReader();
+                let carry = new Uint8Array(0);
 
-                carry = merged.slice(Math.max(0, merged.length - marker.length + 1));
+                while (state.running) {
+                    const { done, value } = await reader.read();
+                    if (done || !value) {
+                        break;
+                    }
+
+                    const merged = concatUint8Arrays(carry, value);
+                    const matches = countPatternOccurrences(merged, marker);
+                    if (matches > 0) {
+                        state.boundaries += matches;
+                    }
+
+                    carry = merged.slice(Math.max(0, merged.length - marker.length + 1));
+                }
+            } catch {
+                // Ignore stream termination and transient network failures.
             }
-        } catch {
-            // Ignore stream termination and transient network failures.
         }
     }
 
@@ -373,6 +438,15 @@
         }
 
         state.animationFrame = requestAnimationFrame(() => drawMjpegFrame(state));
+    }
+
+    function setMjpegBoundaryCount(canvasId, boundaryCount) {
+        const state = dashboardState.mjpegDecoders.get(canvasId);
+        if (!state) {
+            return;
+        }
+
+        state.boundaries = Math.max(0, Math.floor(boundaryCount));
     }
 
     function stopMjpegDecoder(canvasId) {
@@ -604,6 +678,8 @@
     }
 
     function disposeAllDashboard() {
+        stopMockStreamWorker();
+
         const mjpegIds = Array.from(dashboardState.mjpegDecoders.keys());
         for (const decoderId of mjpegIds) {
             stopMjpegDecoder(decoderId);
@@ -621,7 +697,10 @@
     };
 
     window.cvDashboard = {
+        startMockStreamWorker,
+        stopMockStreamWorker,
         startMjpegDecoder,
+        setMjpegBoundaryCount,
         stopMjpegDecoder,
         startWebRtcDiagnostics,
         stopWebRtcDiagnostics,

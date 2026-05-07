@@ -1,0 +1,358 @@
+using System.Text.Json;
+using System.Threading.Channels;
+using Microsoft.JSInterop;
+
+namespace CvWeb.Client.Services;
+
+public sealed class MockStreamService : IMockStreamService
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private readonly IJSRuntime _js;
+    private readonly object _sync = new();
+
+    private readonly Channel<TelemetrySignal> _telemetryIngress = Channel.CreateBounded<TelemetrySignal>(
+        new BoundedChannelOptions(512)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
+    private readonly Channel<MjpegStreamSample> _mjpegIngress = Channel.CreateBounded<MjpegStreamSample>(
+        new BoundedChannelOptions(512)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
+    private readonly List<Channel<TelemetrySignal>> _telemetrySubscribers = [];
+    private readonly List<Channel<MjpegStreamSample>> _mjpegSubscribers = [];
+    private readonly Dictionary<string, WebRtcTrackEnvelope> _webrtcProfiles = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly CancellationTokenSource _fanoutCts = new();
+    private readonly Task _telemetryFanoutTask;
+    private readonly Task _mjpegFanoutTask;
+
+    private DotNetObjectReference<MockStreamService>? _dotNetReference;
+    private bool _isStarted;
+
+    public MockStreamService(IJSRuntime js)
+    {
+        _js = js;
+
+        _telemetryFanoutTask = Task.Run(() => TelemetryFanOutAsync(_fanoutCts.Token));
+        _mjpegFanoutTask = Task.Run(() => MjpegFanOutAsync(_fanoutCts.Token));
+    }
+
+    public async ValueTask StartAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (_isStarted)
+            {
+                return;
+            }
+
+            _dotNetReference = DotNetObjectReference.Create(this);
+            _isStarted = true;
+        }
+
+        await _js.InvokeVoidAsync("cvDashboard.startMockStreamWorker", cancellationToken, _dotNetReference);
+    }
+
+    public async ValueTask StopAsync(CancellationToken cancellationToken = default)
+    {
+        DotNetObjectReference<MockStreamService>? referenceToDispose = null;
+        var shouldStop = false;
+
+        lock (_sync)
+        {
+            if (_isStarted)
+            {
+                shouldStop = true;
+                _isStarted = false;
+                referenceToDispose = _dotNetReference;
+                _dotNetReference = null;
+            }
+        }
+
+        if (!shouldStop)
+        {
+            return;
+        }
+
+        await _js.InvokeVoidAsync("cvDashboard.stopMockStreamWorker", cancellationToken);
+        referenceToDispose?.Dispose();
+    }
+
+    public ChannelReader<TelemetrySignal> SubscribeTelemetry(CancellationToken cancellationToken = default)
+    {
+        var channel = Channel.CreateBounded<TelemetrySignal>(
+            new BoundedChannelOptions(128)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropOldest
+            });
+
+        lock (_sync)
+        {
+            _telemetrySubscribers.Add(channel);
+        }
+
+        if (cancellationToken.CanBeCanceled)
+        {
+            _ = RemoveTelemetrySubscriberOnCancelAsync(channel, cancellationToken);
+        }
+
+        return channel.Reader;
+    }
+
+    public ChannelReader<MjpegStreamSample> SubscribeMjpeg(CancellationToken cancellationToken = default)
+    {
+        var channel = Channel.CreateBounded<MjpegStreamSample>(
+            new BoundedChannelOptions(128)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropOldest
+            });
+
+        lock (_sync)
+        {
+            _mjpegSubscribers.Add(channel);
+        }
+
+        if (cancellationToken.CanBeCanceled)
+        {
+            _ = RemoveMjpegSubscriberOnCancelAsync(channel, cancellationToken);
+        }
+
+        return channel.Reader;
+    }
+
+    public ValueTask<WebRtcTrackEnvelope> GetWebRtcTrackProfileAsync(string profile, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var safeProfile = string.IsNullOrWhiteSpace(profile) ? "balanced" : profile.Trim().ToLowerInvariant();
+
+        lock (_sync)
+        {
+            if (_webrtcProfiles.TryGetValue(safeProfile, out var envelope))
+            {
+                return ValueTask.FromResult(envelope);
+            }
+        }
+
+        return ValueTask.FromResult(BuildFallbackProfile(safeProfile));
+    }
+
+    [JSInvokable]
+    public ValueTask HandleWorkerMessage(string messageType, string payloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(messageType))
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        try
+        {
+            switch (messageType)
+            {
+                case "telemetry":
+                {
+                    var signal = JsonSerializer.Deserialize<TelemetrySignal>(payloadJson, JsonOptions);
+                    if (signal is not null)
+                    {
+                        _telemetryIngress.Writer.TryWrite(signal);
+                    }
+
+                    break;
+                }
+                case "mjpeg":
+                {
+                    var sample = JsonSerializer.Deserialize<MjpegStreamSample>(payloadJson, JsonOptions);
+                    if (sample is not null)
+                    {
+                        _mjpegIngress.Writer.TryWrite(sample);
+                    }
+
+                    break;
+                }
+                case "webrtc-profile":
+                {
+                    var envelope = JsonSerializer.Deserialize<WebRtcTrackEnvelope>(payloadJson, JsonOptions);
+                    if (envelope is not null)
+                    {
+                        lock (_sync)
+                        {
+                            _webrtcProfiles[envelope.Profile] = envelope;
+                        }
+                    }
+
+                    break;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Ignore malformed worker payloads during refreshes or navigation transitions.
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await StopAsync();
+        }
+        catch (JSException)
+        {
+            // Ignore shutdown races where JS runtime is already detached.
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore shutdown races where JS runtime is unavailable.
+        }
+
+        _fanoutCts.Cancel();
+
+        _telemetryIngress.Writer.TryComplete();
+        _mjpegIngress.Writer.TryComplete();
+
+        CompleteSubscribers(_telemetrySubscribers);
+        CompleteSubscribers(_mjpegSubscribers);
+
+        try
+        {
+            await _telemetryFanoutTask;
+            await _mjpegFanoutTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during normal disposal.
+        }
+
+        _fanoutCts.Dispose();
+    }
+
+    private static void CompleteSubscribers<T>(List<Channel<T>> subscribers)
+    {
+        foreach (var subscriber in subscribers)
+        {
+            subscriber.Writer.TryComplete();
+        }
+
+        subscribers.Clear();
+    }
+
+    private async Task RemoveTelemetrySubscriberOnCancelAsync(Channel<TelemetrySignal> channel, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            lock (_sync)
+            {
+                _telemetrySubscribers.Remove(channel);
+            }
+
+            channel.Writer.TryComplete();
+        }
+    }
+
+    private async Task RemoveMjpegSubscriberOnCancelAsync(Channel<MjpegStreamSample> channel, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            lock (_sync)
+            {
+                _mjpegSubscribers.Remove(channel);
+            }
+
+            channel.Writer.TryComplete();
+        }
+    }
+
+    private async Task TelemetryFanOutAsync(CancellationToken cancellationToken)
+    {
+        await foreach (var signal in _telemetryIngress.Reader.ReadAllAsync(cancellationToken))
+        {
+            Channel<TelemetrySignal>[] subscribers;
+            lock (_sync)
+            {
+                subscribers = [.. _telemetrySubscribers];
+            }
+
+            foreach (var subscriber in subscribers)
+            {
+                _ = subscriber.Writer.TryWrite(signal);
+            }
+        }
+    }
+
+    private async Task MjpegFanOutAsync(CancellationToken cancellationToken)
+    {
+        await foreach (var sample in _mjpegIngress.Reader.ReadAllAsync(cancellationToken))
+        {
+            Channel<MjpegStreamSample>[] subscribers;
+            lock (_sync)
+            {
+                subscribers = [.. _mjpegSubscribers];
+            }
+
+            foreach (var subscriber in subscribers)
+            {
+                _ = subscriber.Writer.TryWrite(sample);
+            }
+        }
+    }
+
+    private static WebRtcTrackEnvelope BuildFallbackProfile(string profile)
+    {
+        var normalized = profile switch
+        {
+            "low-bandwidth" => "low-bandwidth",
+            "high-fidelity" => "high-fidelity",
+            _ => "balanced"
+        };
+
+        IReadOnlyList<WebRtcTrack> tracks = normalized switch
+        {
+            "low-bandwidth" =>
+            [
+                new WebRtcTrack("video-main", "video", "sendonly", "VP8", 900, 24, "Main stream for constrained links"),
+                new WebRtcTrack("telemetry-overlay", "video", "sendonly", "VP8", 350, 12, "Overlay channel for metrics"),
+                new WebRtcTrack("audio-ops", "audio", "sendrecv", "OPUS", 48, null, "Operations voice coordination")
+            ],
+            "high-fidelity" =>
+            [
+                new WebRtcTrack("video-main", "video", "sendonly", "AV1", 4200, 60, "Primary high-fidelity stream"),
+                new WebRtcTrack("video-multiview", "video", "sendonly", "VP9", 2800, 45, "Secondary diagnostics camera"),
+                new WebRtcTrack("audio-ops", "audio", "sendrecv", "OPUS", 96, null, "Operations voice coordination")
+            ],
+            _ =>
+            [
+                new WebRtcTrack("video-main", "video", "sendonly", "VP9", 2200, 30, "Primary real-time stream"),
+                new WebRtcTrack("telemetry-overlay", "video", "sendonly", "VP8", 700, 15, "Telemetry annotation layer"),
+                new WebRtcTrack("audio-ops", "audio", "sendrecv", "OPUS", 64, null, "Operations voice coordination")
+            ]
+        };
+
+        return new WebRtcTrackEnvelope(normalized, tracks);
+    }
+}

@@ -2,6 +2,7 @@
 @page "/control-room"
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@inject IMockStreamService MockStreams
 
 <PageTitle>Portfolio Dashboard</PageTitle>
 
@@ -72,6 +73,7 @@
     {
         if (firstRender)
         {
+            await MockStreams.StartAsync();
             await JS.InvokeVoidAsync("cvLanding.init", _landingOwnerToken);
         }
     }
@@ -80,6 +82,7 @@
     {
         try
         {
+            await MockStreams.StopAsync();
             await JS.InvokeVoidAsync("cvDashboard.disposeAll");
             await JS.InvokeVoidAsync("cvLanding.dispose", _landingOwnerToken);
         }

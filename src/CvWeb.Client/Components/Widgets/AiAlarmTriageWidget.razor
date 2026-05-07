@@ -1,6 +1,5 @@
-@using Microsoft.AspNetCore.SignalR.Client
 @implements IAsyncDisposable
-@inject IConfiguration Configuration
+@inject IMockStreamService MockStreams
 
 <div class="widget-status-row">
     <span class="status-dot @StatusClass"></span>
@@ -32,8 +31,9 @@
 
 @code {
     private readonly List<AlertItem> Alerts = new();
+    private readonly CancellationTokenSource _streamCts = new();
 
-    private HubConnection? _hubConnection;
+    private Task? _streamTask;
 
     private double LatestScore { get; set; }
 
@@ -46,78 +46,29 @@
         _ => "status-critical"
     };
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        var baseUrl = (Configuration["DataPumpBaseUrl"] ?? "http://localhost:5094").TrimEnd('/');
-        var hubUrl = $"{baseUrl}/hubs/telemetry";
-
-        _hubConnection = new HubConnectionBuilder()
-            .WithUrl(hubUrl)
-            .WithAutomaticReconnect()
-            .Build();
-
-        _hubConnection.On<TelemetrySignal>("telemetry", async signal =>
-        {
-            await InvokeAsync(() =>
-            {
-                LatestScore = ScoreSignal(signal);
-                ModelState = "active";
-
-                if (LatestScore < 58)
-                {
-                    StateHasChanged();
-                    return;
-                }
-
-                var priority = LatestScore >= 84 ? "P1" : LatestScore >= 72 ? "P2" : "P3";
-                var priorityClass = priority == "P1" ? "alert-critical" : priority == "P2" ? "alert-warning" : "alert-info";
-
-                Alerts.Insert(0, new AlertItem(
-                    signal.Timestamp,
-                    priority,
-                    priorityClass,
-                    $"{signal.Node} CPU {signal.CpuLoadPercent:0.0}% | Packet Loss {signal.PacketLossPercent:0.00}%"));
-
-                if (Alerts.Count > 6)
-                {
-                    Alerts.RemoveAt(Alerts.Count - 1);
-                }
-
-                StateHasChanged();
-            });
-        });
-
-        _hubConnection.Reconnecting += _ =>
-        {
-            ModelState = "degraded";
-            StateHasChanged();
-            return Task.CompletedTask;
-        };
-
-        _hubConnection.Closed += _ =>
-        {
-            ModelState = "offline";
-            StateHasChanged();
-            return Task.CompletedTask;
-        };
-
-        try
-        {
-            await _hubConnection.StartAsync();
-            ModelState = "active";
-        }
-        catch
-        {
-            ModelState = "offline";
-        }
+        var telemetryReader = MockStreams.SubscribeTelemetry(_streamCts.Token);
+        _streamTask = ConsumeTelemetryAsync(telemetryReader, _streamCts.Token);
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_hubConnection is not null)
+        _streamCts.Cancel();
+
+        if (_streamTask is not null)
         {
-            await _hubConnection.DisposeAsync();
+            try
+            {
+                await _streamTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during component teardown.
+            }
         }
+
+        _streamCts.Dispose();
     }
 
     private static double ScoreSignal(TelemetrySignal signal)
@@ -137,12 +88,49 @@
 
     private sealed record AlertItem(DateTimeOffset Timestamp, string Priority, string PriorityClass, string Message);
 
-    private sealed record TelemetrySignal(
-        string Node,
-        DateTimeOffset Timestamp,
-        double CpuLoadPercent,
-        double MemoryLoadPercent,
-        double PacketLossPercent,
-        int ActiveStreams,
-        int AlertLevel);
+    private async Task ConsumeTelemetryAsync(System.Threading.Channels.ChannelReader<TelemetrySignal> telemetryReader, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var signal in telemetryReader.ReadAllAsync(cancellationToken))
+            {
+                await InvokeAsync(() =>
+                {
+                    LatestScore = ScoreSignal(signal);
+                    ModelState = "active";
+
+                    if (LatestScore >= 58)
+                    {
+                        var priority = LatestScore >= 84 ? "P1" : LatestScore >= 72 ? "P2" : "P3";
+                        var priorityClass = priority == "P1" ? "alert-critical" : priority == "P2" ? "alert-warning" : "alert-info";
+
+                        Alerts.Insert(0, new AlertItem(
+                            signal.Timestamp,
+                            priority,
+                            priorityClass,
+                            $"{signal.Node} CPU {signal.CpuLoadPercent:0.0}% | Packet Loss {signal.PacketLossPercent:0.00}%"));
+
+                        if (Alerts.Count > 6)
+                        {
+                            Alerts.RemoveAt(Alerts.Count - 1);
+                        }
+                    }
+
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during component teardown.
+        }
+        catch
+        {
+            await InvokeAsync(() =>
+            {
+                ModelState = "degraded";
+                StateHasChanged();
+            });
+        }
+    }
 }
