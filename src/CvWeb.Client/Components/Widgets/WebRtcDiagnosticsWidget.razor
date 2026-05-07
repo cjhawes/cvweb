@@ -1,6 +1,6 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
-@inject IConfiguration Configuration
+@inject IMockStreamService MockStreams
 
 <video id="@VideoId" class="diagnostic-video" autoplay muted playsinline></video>
 
@@ -45,17 +45,11 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var baseUrl = (Configuration["DataPumpBaseUrl"] ?? "http://localhost:5094").TrimEnd('/');
-        using var client = new HttpClient { BaseAddress = new Uri(baseUrl) };
-
         try
         {
-            var profile = await client.GetFromJsonAsync<WebRtcTrackEnvelope>("/api/webrtc/tracks?profile=balanced");
-            if (profile is not null)
-            {
-                TrackProfile = profile.Profile;
-                TrackCount = profile.Tracks.Count;
-            }
+            var profile = await MockStreams.GetWebRtcTrackProfileAsync("balanced");
+            TrackProfile = profile.Profile;
+            TrackCount = profile.Tracks.Count;
         }
         catch
         {
@@ -104,15 +98,4 @@
 
         _dotNetReference?.Dispose();
     }
-
-    private sealed record WebRtcTrackEnvelope(string Profile, List<WebRtcTrack> Tracks);
-
-    private sealed record WebRtcTrack(
-        string Id,
-        string Kind,
-        string Direction,
-        string Codec,
-        int? MaxBitrateKbps,
-        int? TargetFps,
-        string Purpose);
 }

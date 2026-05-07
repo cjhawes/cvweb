@@ -1,6 +1,6 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
-@inject IConfiguration Configuration
+@inject IMockStreamService MockStreams
 
 <canvas id="@CanvasId" class="decoder-canvas" width="520" height="280" aria-label="MJPEG decoding canvas"></canvas>
 
@@ -12,11 +12,19 @@
 
 @code {
     private readonly string CanvasId = $"mjpeg-canvas-{Guid.NewGuid():N}";
-    private DotNetObjectReference<MjpegCanvasWidget>? _dotNetReference;
+    private readonly CancellationTokenSource _streamCts = new();
+
+    private Task? _streamTask;
 
     private int BoundaryCount { get; set; }
 
     private int RenderFps { get; set; }
+
+    protected override void OnInitialized()
+    {
+        var mjpegReader = MockStreams.SubscribeMjpeg(_streamCts.Token);
+        _streamTask = ConsumeMjpegAsync(mjpegReader, _streamCts.Token);
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -25,20 +33,7 @@
             return;
         }
 
-        _dotNetReference = DotNetObjectReference.Create(this);
-        var baseUrl = (Configuration["DataPumpBaseUrl"] ?? "http://localhost:5094").TrimEnd('/');
-        var streamUrl = $"{baseUrl}/api/mjpeg/stream?fps=30";
-
-        await JS.InvokeVoidAsync("cvDashboard.startMjpegDecoder", CanvasId, streamUrl, _dotNetReference);
-    }
-
-    [JSInvokable]
-    public Task UpdateMjpegStats(int boundaries, int fps)
-    {
-        BoundaryCount = boundaries;
-        RenderFps = fps;
-        StateHasChanged();
-        return Task.CompletedTask;
+        await JS.InvokeVoidAsync("cvDashboard.startMjpegDecoder", CanvasId);
     }
 
     public async ValueTask DisposeAsync()
@@ -52,6 +47,42 @@
             // Ignore teardown errors during route transitions.
         }
 
-        _dotNetReference?.Dispose();
+        _streamCts.Cancel();
+
+        if (_streamTask is not null)
+        {
+            try
+            {
+                await _streamTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during component teardown.
+            }
+        }
+
+        _streamCts.Dispose();
+    }
+
+    private async Task ConsumeMjpegAsync(System.Threading.Channels.ChannelReader<MjpegStreamSample> mjpegReader, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var sample in mjpegReader.ReadAllAsync(cancellationToken))
+            {
+                await InvokeAsync(async () =>
+                {
+                    BoundaryCount = sample.BoundaryCount;
+                    RenderFps = sample.RenderFps;
+
+                    await JS.InvokeVoidAsync("cvDashboard.setMjpegBoundaryCount", CanvasId, BoundaryCount);
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during component teardown.
+        }
     }
 }

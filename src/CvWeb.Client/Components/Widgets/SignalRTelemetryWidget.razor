@@ -1,6 +1,5 @@
-@using Microsoft.AspNetCore.SignalR.Client
 @implements IAsyncDisposable
-@inject IConfiguration Configuration
+@inject IMockStreamService MockStreams
 
 <div class="widget-status-row">
     <span class="status-dot @ConnectionClass"></span>
@@ -20,8 +19,9 @@
 @code {
     private const int MaxPoints = 40;
     private readonly List<double> _cpuPoints = new();
+    private readonly CancellationTokenSource _streamCts = new();
 
-    private HubConnection? _hubConnection;
+    private Task? _streamTask;
 
     private double LatestCpu { get; set; }
 
@@ -31,10 +31,12 @@
 
     private string ConnectionLabel { get; set; } = "Connecting to stream...";
 
-    private string ConnectionClass => _hubConnection?.State switch
+    private string ConnectionState { get; set; } = "connecting";
+
+    private string ConnectionClass => ConnectionState switch
     {
-        HubConnectionState.Connected => "status-ok",
-        HubConnectionState.Reconnecting => "status-warning",
+        "connected" => "status-ok",
+        "degraded" => "status-warning",
         _ => "status-critical"
     };
 
@@ -53,81 +55,67 @@
         }
     }
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        var baseUrl = (Configuration["DataPumpBaseUrl"] ?? "http://localhost:5094").TrimEnd('/');
-        var hubUrl = $"{baseUrl}/hubs/telemetry";
-
-        _hubConnection = new HubConnectionBuilder()
-            .WithUrl(hubUrl)
-            .WithAutomaticReconnect()
-            .Build();
-
-        _hubConnection.On<TelemetrySignal>("telemetry", async signal =>
-        {
-            await InvokeAsync(() =>
-            {
-                LatestCpu = signal.CpuLoadPercent;
-                LatestMemory = signal.MemoryLoadPercent;
-                LatestPacketLoss = signal.PacketLossPercent;
-
-                _cpuPoints.Add(LatestCpu);
-                if (_cpuPoints.Count > MaxPoints)
-                {
-                    _cpuPoints.RemoveAt(0);
-                }
-
-                ConnectionLabel = $"Live stream: {signal.Node} @ {signal.Timestamp:HH:mm:ss}";
-                StateHasChanged();
-            });
-        });
-
-        _hubConnection.Reconnecting += _ =>
-        {
-            ConnectionLabel = "Reconnecting stream...";
-            StateHasChanged();
-            return Task.CompletedTask;
-        };
-
-        _hubConnection.Reconnected += _ =>
-        {
-            ConnectionLabel = "Stream reconnected";
-            StateHasChanged();
-            return Task.CompletedTask;
-        };
-
-        _hubConnection.Closed += _ =>
-        {
-            ConnectionLabel = "Stream offline";
-            StateHasChanged();
-            return Task.CompletedTask;
-        };
-
-        try
-        {
-            await _hubConnection.StartAsync();
-            ConnectionLabel = "Live stream connected";
-        }
-        catch
-        {
-            ConnectionLabel = "Unable to connect telemetry stream";
-        }
+        var telemetryReader = MockStreams.SubscribeTelemetry(_streamCts.Token);
+        _streamTask = ConsumeTelemetryAsync(telemetryReader, _streamCts.Token);
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_hubConnection is not null)
+        _streamCts.Cancel();
+
+        if (_streamTask is not null)
         {
-            await _hubConnection.DisposeAsync();
+            try
+            {
+                await _streamTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during component teardown.
+            }
         }
+
+        _streamCts.Dispose();
     }
 
-    private sealed record TelemetrySignal(
-        string Node,
-        DateTimeOffset Timestamp,
-        double CpuLoadPercent,
-        double MemoryLoadPercent,
-        double PacketLossPercent,
-        int ActiveStreams,
-        int AlertLevel);
+    private async Task ConsumeTelemetryAsync(System.Threading.Channels.ChannelReader<TelemetrySignal> telemetryReader, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var signal in telemetryReader.ReadAllAsync(cancellationToken))
+            {
+                await InvokeAsync(() =>
+                {
+                    LatestCpu = signal.CpuLoadPercent;
+                    LatestMemory = signal.MemoryLoadPercent;
+                    LatestPacketLoss = signal.PacketLossPercent;
+
+                    _cpuPoints.Add(LatestCpu);
+                    if (_cpuPoints.Count > MaxPoints)
+                    {
+                        _cpuPoints.RemoveAt(0);
+                    }
+
+                    ConnectionState = "connected";
+                    ConnectionLabel = $"Live stream: {signal.Node} @ {signal.Timestamp:HH:mm:ss}";
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during component teardown.
+        }
+        catch
+        {
+            await InvokeAsync(() =>
+            {
+                ConnectionState = "degraded";
+                ConnectionLabel = "Telemetry stream degraded";
+                StateHasChanged();
+            });
+        }
+    }
 }
