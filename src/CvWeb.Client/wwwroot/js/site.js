@@ -14,6 +14,7 @@
     const dashboardState = {
         mjpegDecoders: new Map(),
         webrtcSessions: new Map(),
+        gpuAlignmentSessions: new Map(),
         mockWorker: null,
         mockDotNetRef: null
     };
@@ -305,6 +306,426 @@
         dashboardState.mockWorker.terminate();
         dashboardState.mockWorker = null;
         dashboardState.mockDotNetRef = null;
+    }
+
+    function createGlShader(gl, shaderType, source) {
+        const shader = gl.createShader(shaderType);
+        if (!shader) {
+            throw new Error("Unable to allocate shader.");
+        }
+
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            const info = gl.getShaderInfoLog(shader) || "Unknown shader compilation error.";
+            gl.deleteShader(shader);
+            throw new Error(info);
+        }
+
+        return shader;
+    }
+
+    function createGlProgram(gl, vertexSource, fragmentSource) {
+        const vertexShader = createGlShader(gl, gl.VERTEX_SHADER, vertexSource);
+        const fragmentShader = createGlShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+        const program = gl.createProgram();
+
+        if (!program) {
+            gl.deleteShader(vertexShader);
+            gl.deleteShader(fragmentShader);
+            throw new Error("Unable to allocate shader program.");
+        }
+
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        gl.deleteShader(vertexShader);
+        gl.deleteShader(fragmentShader);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            const info = gl.getProgramInfoLog(program) || "Unknown program link error.";
+            gl.deleteProgram(program);
+            throw new Error(info);
+        }
+
+        return program;
+    }
+
+    function createTextureFromImage(gl, imageLike) {
+        const texture = gl.createTexture();
+        if (!texture) {
+            throw new Error("Unable to allocate texture.");
+        }
+
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imageLike);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
+        return texture;
+    }
+
+    function createRenderTarget(gl, width, height) {
+        const texture = gl.createTexture();
+        if (!texture) {
+            throw new Error("Unable to allocate render target texture.");
+        }
+
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+        const framebuffer = gl.createFramebuffer();
+        if (!framebuffer) {
+            gl.deleteTexture(texture);
+            throw new Error("Unable to allocate framebuffer.");
+        }
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.deleteFramebuffer(framebuffer);
+            gl.deleteTexture(texture);
+            throw new Error("Framebuffer is incomplete.");
+        }
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
+        return { framebuffer, texture };
+    }
+
+    async function loadBitmap(url) {
+        const response = await fetch(url, { cache: "force-cache" });
+        if (!response.ok) {
+            throw new Error(`Failed to load texture: ${url}`);
+        }
+
+        const blob = await response.blob();
+        return createImageBitmap(blob, {
+            colorSpaceConversion: "none",
+            premultiplyAlpha: "none"
+        });
+    }
+
+    function configureQuadBuffer(gl) {
+        const quad = gl.createBuffer();
+        if (!quad) {
+            throw new Error("Unable to allocate quad buffer.");
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+        gl.bufferData(
+            gl.ARRAY_BUFFER,
+            new Float32Array([
+                -1, -1,
+                1, -1,
+                -1, 1,
+                1, 1
+            ]),
+            gl.STATIC_DRAW
+        );
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+        return quad;
+    }
+
+    function setViewportToDisplaySize(gl, canvas) {
+        const ratio = window.devicePixelRatio || 1;
+        const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * ratio));
+        const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * ratio));
+
+        if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width = displayWidth;
+            canvas.height = displayHeight;
+        }
+
+        gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawFullscreenPass(gl, program, quadBuffer) {
+        const positionLocation = gl.getAttribLocation(program, "aPosition");
+
+        gl.useProgram(program);
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+        gl.enableVertexAttribArray(positionLocation);
+        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        gl.disableVertexAttribArray(positionLocation);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    }
+
+    function runGpuAlignmentPass(state) {
+        const { gl } = state;
+        const passStart = performance.now();
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
+        gl.viewport(0, 0, state.textureWidth, state.textureHeight);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, state.textureA);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, state.textureB);
+
+        gl.useProgram(state.compareProgram);
+        gl.uniform1i(state.compareTextureALocation, 0);
+        gl.uniform1i(state.compareTextureBLocation, 1);
+        drawFullscreenPass(gl, state.compareProgram, state.quadBuffer);
+
+        if (!state.readback || state.readback.length !== state.comparedBytes) {
+            state.readback = new Uint8Array(state.comparedBytes);
+        }
+
+        gl.readPixels(0, 0, state.textureWidth, state.textureHeight, gl.RGBA, gl.UNSIGNED_BYTE, state.readback);
+
+        let changedBytes = 0;
+        let mismatchedPixels = 0;
+        for (let index = 0; index < state.readback.length; index += 4) {
+            const r = state.readback[index] > 0 ? 1 : 0;
+            const g = state.readback[index + 1] > 0 ? 1 : 0;
+            const b = state.readback[index + 2] > 0 ? 1 : 0;
+            const a = state.readback[index + 3] > 0 ? 1 : 0;
+            const sum = r + g + b + a;
+
+            changedBytes += sum;
+            if (sum > 0) {
+                mismatchedPixels += 1;
+            }
+        }
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        setViewportToDisplaySize(gl, state.canvas);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, state.outputTexture);
+        gl.useProgram(state.previewProgram);
+        gl.uniform1i(state.previewTextureLocation, 0);
+        drawFullscreenPass(gl, state.previewProgram, state.quadBuffer);
+
+        return {
+            changedBytes,
+            mismatchedPixels,
+            comparedBytes: state.comparedBytes,
+            elapsedMilliseconds: performance.now() - passStart,
+            textureWidth: state.textureWidth,
+            textureHeight: state.textureHeight
+        };
+    }
+
+    async function startGpuAlignmentChecker(canvasId, dotNetRef, textureAUrl, textureBUrl) {
+        stopGpuAlignmentChecker(canvasId);
+
+        const canvas = document.getElementById(canvasId);
+        if (!(canvas instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        const gl = canvas.getContext("webgl2", {
+            alpha: false,
+            antialias: false,
+            depth: false,
+            preserveDrawingBuffer: false
+        });
+
+        if (!gl) {
+            if (dotNetRef) {
+                dotNetRef.invokeMethodAsync("UpdateGpuAlignmentFailure", "WebGL2 is not supported in this browser.").catch(() => {
+                    // Ignore callback failures during route transitions.
+                });
+            }
+
+            return;
+        }
+
+        const vertexShaderSource = `#version 300 es
+in vec2 aPosition;
+out vec2 vUv;
+void main() {
+    vUv = (aPosition + 1.0) * 0.5;
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+}`;
+
+        const compareFragmentSource = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uTextureA;
+uniform sampler2D uTextureB;
+in vec2 vUv;
+out vec4 outColor;
+void main() {
+    ivec4 a = ivec4(round(texture(uTextureA, vUv) * 255.0));
+    ivec4 b = ivec4(round(texture(uTextureB, vUv) * 255.0));
+    bvec4 mismatch = notEqual(a, b);
+    outColor = vec4(mismatch);
+}`;
+
+        const previewFragmentSource = `#version 300 es
+precision highp float;
+uniform sampler2D uMismatchTexture;
+in vec2 vUv;
+out vec4 outColor;
+void main() {
+    vec4 mismatch = texture(uMismatchTexture, vUv);
+    float intensity = clamp((mismatch.r + mismatch.g + mismatch.b + mismatch.a) * 0.25, 0.0, 1.0);
+    vec3 base = vec3(0.05, 0.11, 0.2);
+    vec3 hot = vec3(1.0, 0.5, 0.2);
+    vec3 color = mix(base, hot, intensity);
+    outColor = vec4(color, 1.0);
+}`;
+
+        let bitmapA;
+        let bitmapB;
+
+        try {
+            [bitmapA, bitmapB] = await Promise.all([
+                loadBitmap(textureAUrl),
+                loadBitmap(textureBUrl)
+            ]);
+        } catch {
+            if (dotNetRef) {
+                dotNetRef.invokeMethodAsync("UpdateGpuAlignmentFailure", "Failed to load 4K reference textures.").catch(() => {
+                    // Ignore callback failures during route transitions.
+                });
+            }
+            return;
+        }
+
+        const textureWidth = Math.min(bitmapA.width, bitmapB.width);
+        const textureHeight = Math.min(bitmapA.height, bitmapB.height);
+
+        if (textureWidth < 3840 || textureHeight < 2160) {
+            if (dotNetRef) {
+                dotNetRef.invokeMethodAsync("UpdateGpuAlignmentFailure", "Reference textures must be 4K (3840x2160) or larger.").catch(() => {
+                    // Ignore callback failures during route transitions.
+                });
+            }
+
+            bitmapA.close();
+            bitmapB.close();
+            return;
+        }
+
+        try {
+            const compareProgram = createGlProgram(gl, vertexShaderSource, compareFragmentSource);
+            const previewProgram = createGlProgram(gl, vertexShaderSource, previewFragmentSource);
+            const quadBuffer = configureQuadBuffer(gl);
+            const textureA = createTextureFromImage(gl, bitmapA);
+            const textureB = createTextureFromImage(gl, bitmapB);
+            const renderTarget = createRenderTarget(gl, textureWidth, textureHeight);
+
+            const state = {
+                canvas,
+                gl,
+                dotNetRef,
+                quadBuffer,
+                compareProgram,
+                previewProgram,
+                compareTextureALocation: gl.getUniformLocation(compareProgram, "uTextureA"),
+                compareTextureBLocation: gl.getUniformLocation(compareProgram, "uTextureB"),
+                previewTextureLocation: gl.getUniformLocation(previewProgram, "uMismatchTexture"),
+                textureA,
+                textureB,
+                framebuffer: renderTarget.framebuffer,
+                outputTexture: renderTarget.texture,
+                textureWidth,
+                textureHeight,
+                comparedBytes: textureWidth * textureHeight * 4,
+                readback: null,
+                resizeHandler: null
+            };
+
+            state.resizeHandler = () => {
+                setViewportToDisplaySize(gl, canvas);
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, state.outputTexture);
+                gl.useProgram(state.previewProgram);
+                gl.uniform1i(state.previewTextureLocation, 0);
+                drawFullscreenPass(gl, state.previewProgram, state.quadBuffer);
+            };
+
+            window.addEventListener("resize", state.resizeHandler, { passive: true });
+            dashboardState.gpuAlignmentSessions.set(canvasId, state);
+
+            const result = runGpuAlignmentPass(state);
+
+            if (dotNetRef) {
+                dotNetRef.invokeMethodAsync(
+                    "UpdateGpuAlignmentResult",
+                    result.changedBytes,
+                    result.comparedBytes,
+                    result.mismatchedPixels,
+                    Math.round(result.elapsedMilliseconds * 100) / 100,
+                    "webgl2-fragment",
+                    result.textureWidth,
+                    result.textureHeight
+                ).catch(() => {
+                    // Ignore callback failures during route transitions.
+                });
+            }
+
+            state.resizeHandler();
+        } catch {
+            if (dotNetRef) {
+                dotNetRef.invokeMethodAsync("UpdateGpuAlignmentFailure", "GPU comparison shader failed to execute.").catch(() => {
+                    // Ignore callback failures during route transitions.
+                });
+            }
+        } finally {
+            bitmapA.close();
+            bitmapB.close();
+        }
+    }
+
+    function stopGpuAlignmentChecker(canvasId) {
+        const state = dashboardState.gpuAlignmentSessions.get(canvasId);
+        if (!state) {
+            return;
+        }
+
+        const { gl } = state;
+
+        if (state.resizeHandler) {
+            window.removeEventListener("resize", state.resizeHandler);
+        }
+
+        if (state.quadBuffer) {
+            gl.deleteBuffer(state.quadBuffer);
+        }
+
+        if (state.textureA) {
+            gl.deleteTexture(state.textureA);
+        }
+
+        if (state.textureB) {
+            gl.deleteTexture(state.textureB);
+        }
+
+        if (state.outputTexture) {
+            gl.deleteTexture(state.outputTexture);
+        }
+
+        if (state.framebuffer) {
+            gl.deleteFramebuffer(state.framebuffer);
+        }
+
+        if (state.compareProgram) {
+            gl.deleteProgram(state.compareProgram);
+        }
+
+        if (state.previewProgram) {
+            gl.deleteProgram(state.previewProgram);
+        }
+
+        dashboardState.gpuAlignmentSessions.delete(canvasId);
     }
 
     async function startMjpegDecoder(canvasId, streamUrl = "", dotNetRef = null) {
@@ -680,6 +1101,11 @@
     function disposeAllDashboard() {
         stopMockStreamWorker();
 
+        const gpuIds = Array.from(dashboardState.gpuAlignmentSessions.keys());
+        for (const gpuId of gpuIds) {
+            stopGpuAlignmentChecker(gpuId);
+        }
+
         const mjpegIds = Array.from(dashboardState.mjpegDecoders.keys());
         for (const decoderId of mjpegIds) {
             stopMjpegDecoder(decoderId);
@@ -699,6 +1125,8 @@
     window.cvDashboard = {
         startMockStreamWorker,
         stopMockStreamWorker,
+        startGpuAlignmentChecker,
+        stopGpuAlignmentChecker,
         startMjpegDecoder,
         setMjpegBoundaryCount,
         stopMjpegDecoder,

@@ -35,3 +35,36 @@ Replace dashboard runtime dependencies on external API/SignalR endpoints with an
 - Bounded channels use `DropOldest` to prevent unbounded queue growth under bursty conditions.
 - Stream fan-out is non-blocking (`TryWrite`) to avoid producer stalls.
 - Worker message flow removes dashboard hard dependency on remote network endpoints for core telemetry simulation.
+
+## Phase 2: GPGPU Alignment Checker Widget
+
+### Objective
+Implement a byte-level 4K reference texture comparison widget using GPU fragment shading through C# JS interop while preserving the existing dashboard grid and card shell CSS.
+
+### Key Decisions
+- Added `GpuAlignmentChecker` as a new dashboard widget component with a `.razor` + `.razor.cs` split to keep UI and interop orchestration cleanly separated.
+- Added static 4K reference assets at:
+  - `src/CvWeb.Client/wwwroot/images/gpu-reference-a.svg`
+  - `src/CvWeb.Client/wwwroot/images/gpu-reference-b.svg`
+- Added `GpuAlignmentMetrics` service helper to keep drift/threshold logic deterministic and testable.
+- Extended `wwwroot/js/site.js` with:
+  - `startGpuAlignmentChecker`
+  - `stopGpuAlignmentChecker`
+  - disposal integration in `disposeAllDashboard`
+
+### Runtime Flow
+1. `GpuAlignmentChecker` mounts and calls `cvDashboard.startGpuAlignmentChecker(...)`.
+2. JS creates a WebGL2 context and compiles the compare/preview fragment shader pipeline.
+3. Two static 4K textures are loaded, uploaded, and compared channel-by-channel in a GPU render pass.
+4. JS performs a single `readPixels` against the 4K mismatch buffer and computes:
+   - changed bytes
+   - mismatched pixels
+   - elapsed pass time
+5. Metrics are returned to C# through `[JSInvokable] UpdateGpuAlignmentResult(...)` and rendered in the widget.
+6. Widget disposal calls `cvDashboard.stopGpuAlignmentChecker(...)` to release shaders, buffers, textures, and framebuffer state.
+
+### Performance Notes
+- GPU resources are created once per widget session and explicitly disposed on teardown.
+- Readback uses a reusable typed array buffer to avoid repeated allocations.
+- Shader compare uses nearest-neighbor sampling to preserve deterministic byte-level channel comparisons.
+- Dashboard card count and grid selectors are unchanged, preserving existing layout behavior.

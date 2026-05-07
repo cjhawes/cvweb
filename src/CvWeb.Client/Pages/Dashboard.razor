@@ -24,12 +24,12 @@
     </header>
 
     <section class="widget-grid section">
-        <WidgetCard Title="Project 01 | WASM Image Diff"
-                    Challenge="Physical camera drift is subtle and can hide in long-running deployments."
-                    Solution="Pre-loaded reference and live captures are compared in-browser at the byte level to estimate drift quickly."
-                    Stack="C#, Blazor WASM"
-                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/ImageDiffWidget.razor">
-            <ImageDiffWidget />
+        <WidgetCard Title="Project 01 | GPGPU Alignment Checker"
+                Challenge="Physical camera drift can be invisible to the human eye but still degrade downstream analytics."
+                Solution="A fragment shader compares two static 4K reference textures channel-by-channel and returns byte-level drift metrics in milliseconds."
+                Stack="C#, Blazor WASM, JS Interop, WebGL2"
+                SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/GpuAlignmentChecker.razor">
+            <GpuAlignmentChecker />
         </WidgetCard>
 
         <WidgetCard Title="Project 02 | SignalR IoT Telemetry"
