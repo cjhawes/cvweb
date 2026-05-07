@@ -224,6 +224,8 @@ Important responsive behavior:
 - `window.cvDashboard`
   - `startMjpegDecoder(canvasId, streamUrl, dotNetRef)`
   - `stopMjpegDecoder(canvasId)`
+  - `startTelemetryGrid(canvasId, dotNetRef, gridWidth, gridHeight)`
+  - `stopTelemetryGrid(canvasId)`
   - `startWebRtcDiagnostics(videoId, dotNetRef)`
   - `stopWebRtcDiagnostics(videoId)`
   - `disposeAll()`
@@ -242,6 +244,7 @@ Current widget implementations:
 
 - `ImageDiffWidget.razor`: local byte-level drift comparison
 - `SignalRTelemetryWidget.razor`: streaming sparkline and metrics
+- `TelemetryGrid.razor`: 1,024-sensor synthetic mesh rendered at 60Hz on canvas
 - `MjpegCanvasWidget.razor`: synthetic multipart stream diagnostics
 - `AiAlarmTriageWidget.razor`: local alert scoring model
 - `WebRtcDiagnosticsWidget.razor`: synthetic WebRTC connection and health stats

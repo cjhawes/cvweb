@@ -15,6 +15,7 @@
         mjpegDecoders: new Map(),
         webrtcSessions: new Map(),
         gpuAlignmentSessions: new Map(),
+        telemetryGridSessions: new Map(),
         mockWorker: null,
         mockDotNetRef: null
     };
@@ -257,13 +258,18 @@
         dashboardState.mockDotNetRef = dotNetRef;
 
         worker.onmessage = (event) => {
-            if (!dashboardState.mockDotNetRef) {
-                return;
-            }
-
             const envelope = event.data || {};
             const messageType = typeof envelope.type === "string" ? envelope.type : "";
             if (!messageType) {
+                return;
+            }
+
+            if (messageType === "telemetry-grid") {
+                routeTelemetryGridFrame(envelope.payload);
+                return;
+            }
+
+            if (!dashboardState.mockDotNetRef) {
                 return;
             }
 
@@ -306,6 +312,281 @@
         dashboardState.mockWorker.terminate();
         dashboardState.mockWorker = null;
         dashboardState.mockDotNetRef = null;
+
+        for (const telemetryGridState of dashboardState.telemetryGridSessions.values()) {
+            telemetryGridState.streamState = "waiting";
+        }
+    }
+
+    function buildTelemetryPalette() {
+        const palette = new Uint8ClampedArray(256 * 4);
+
+        for (let index = 0; index < 256; index += 1) {
+            const t = index / 255;
+            const r = Math.round(14 + t * 224);
+            const g = Math.round(36 + Math.sin(t * Math.PI) * 130);
+            const b = Math.round(56 + (1 - t) * 166);
+            const offset = index * 4;
+
+            palette[offset] = r;
+            palette[offset + 1] = g;
+            palette[offset + 2] = b;
+            palette[offset + 3] = 255;
+        }
+
+        return palette;
+    }
+
+    function createTelemetryRing(capacity, sensorCount) {
+        return Array.from({ length: capacity }, () => ({
+            intensities: new Uint8Array(sensorCount),
+            alerts: new Uint8Array(sensorCount),
+            sequence: 0,
+            alertCount: 0,
+            cpuAveragePercent: 0,
+            packetLossAveragePercent: 0,
+            timestamp: ""
+        }));
+    }
+
+    function startTelemetryGrid(canvasId, dotNetRef, gridWidth = 32, gridHeight = 32) {
+        stopTelemetryGrid(canvasId);
+
+        const canvas = document.getElementById(canvasId);
+        if (!(canvas instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        const context = canvas.getContext("2d");
+        if (!context) {
+            return;
+        }
+
+        const safeGridWidth = Math.max(1, Math.floor(gridWidth));
+        const safeGridHeight = Math.max(1, Math.floor(gridHeight));
+        const sensorCount = safeGridWidth * safeGridHeight;
+        const ringCapacity = 256;
+        const ringMask = ringCapacity - 1;
+
+        const offscreenCanvas = document.createElement("canvas");
+        offscreenCanvas.width = safeGridWidth;
+        offscreenCanvas.height = safeGridHeight;
+
+        const offscreenContext = offscreenCanvas.getContext("2d", {
+            alpha: false
+        });
+
+        if (!offscreenContext) {
+            return;
+        }
+
+        const state = {
+            canvas,
+            context,
+            dotNetRef,
+            gridWidth: safeGridWidth,
+            gridHeight: safeGridHeight,
+            sensorCount,
+            ring: createTelemetryRing(ringCapacity, sensorCount),
+            ringCapacity,
+            ringMask,
+            writeIndex: 0,
+            bufferedFrames: 0,
+            droppedFrames: 0,
+            latestSequence: 0,
+            latestAlertCount: 0,
+            latestCpuAveragePercent: 0,
+            latestPacketLossAveragePercent: 0,
+            palette: buildTelemetryPalette(),
+            offscreenCanvas,
+            offscreenContext,
+            imageData: offscreenContext.createImageData(safeGridWidth, safeGridHeight),
+            ingestCounter: 0,
+            renderCounter: 0,
+            ingestRateHz: 0,
+            renderRateFps: 0,
+            statsWindowStartedAt: performance.now(),
+            lastFrameAt: performance.now(),
+            animationFrame: null,
+            resizeHandler: null,
+            streamState: dashboardState.mockWorker ? "connected" : "waiting"
+        };
+
+        state.resizeHandler = () => scaleCanvas(canvas, context);
+        window.addEventListener("resize", state.resizeHandler, { passive: true });
+        state.resizeHandler();
+
+        dashboardState.telemetryGridSessions.set(canvasId, state);
+        state.animationFrame = requestAnimationFrame(() => drawTelemetryGrid(state));
+    }
+
+    function stopTelemetryGrid(canvasId) {
+        const state = dashboardState.telemetryGridSessions.get(canvasId);
+        if (!state) {
+            return;
+        }
+
+        if (state.animationFrame) {
+            cancelAnimationFrame(state.animationFrame);
+        }
+
+        if (state.resizeHandler) {
+            window.removeEventListener("resize", state.resizeHandler);
+        }
+
+        dashboardState.telemetryGridSessions.delete(canvasId);
+    }
+
+    function routeTelemetryGridFrame(payload) {
+        if (!payload) {
+            return;
+        }
+
+        const sessions = Array.from(dashboardState.telemetryGridSessions.values());
+        for (const session of sessions) {
+            ingestTelemetryGridFrame(session, payload);
+        }
+    }
+
+    function ingestTelemetryGridFrame(session, payload) {
+        const sourceIntensities = payload.intensities;
+        const sourceAlerts = payload.alerts;
+
+        if (!sourceIntensities || !sourceAlerts) {
+            return;
+        }
+
+        if (sourceIntensities.length < session.sensorCount || sourceAlerts.length < session.sensorCount) {
+            return;
+        }
+
+        const slot = session.ring[session.writeIndex];
+
+        for (let index = 0; index < session.sensorCount; index += 1) {
+            slot.intensities[index] = sourceIntensities[index] & 255;
+            slot.alerts[index] = sourceAlerts[index] & 255;
+        }
+
+        slot.sequence = typeof payload.sequence === "number" ? payload.sequence : session.latestSequence + 1;
+        slot.alertCount = typeof payload.alertCount === "number" ? payload.alertCount : 0;
+        slot.cpuAveragePercent = typeof payload.cpuAveragePercent === "number" ? payload.cpuAveragePercent : 0;
+        slot.packetLossAveragePercent = typeof payload.packetLossAveragePercent === "number" ? payload.packetLossAveragePercent : 0;
+        slot.timestamp = typeof payload.timestamp === "string" ? payload.timestamp : "";
+
+        session.latestSequence = slot.sequence;
+        session.latestAlertCount = slot.alertCount;
+        session.latestCpuAveragePercent = slot.cpuAveragePercent;
+        session.latestPacketLossAveragePercent = slot.packetLossAveragePercent;
+        session.lastFrameAt = performance.now();
+        session.streamState = "connected";
+
+        session.writeIndex = (session.writeIndex + 1) & session.ringMask;
+        if (session.bufferedFrames < session.ringCapacity) {
+            session.bufferedFrames += 1;
+        } else {
+            session.droppedFrames += 1;
+        }
+
+        session.ingestCounter += 1;
+    }
+
+    function drawTelemetryGrid(state) {
+        if (!dashboardState.telemetryGridSessions.has(state.canvas.id)) {
+            return;
+        }
+
+        const now = performance.now();
+
+        if (state.bufferedFrames > 0) {
+            const latestIndex = (state.writeIndex - 1 + state.ringCapacity) & state.ringMask;
+            const latestFrame = state.ring[latestIndex];
+
+            state.bufferedFrames = 0;
+            renderTelemetryGridFrame(state, latestFrame);
+            state.renderCounter += 1;
+        } else if (now - state.lastFrameAt > 1500) {
+            state.streamState = dashboardState.mockWorker ? "degraded" : "waiting";
+        }
+
+        if (now - state.statsWindowStartedAt >= 1000) {
+            const elapsedSeconds = (now - state.statsWindowStartedAt) / 1000;
+            state.ingestRateHz = state.ingestCounter / elapsedSeconds;
+            state.renderRateFps = state.renderCounter / elapsedSeconds;
+            state.ingestCounter = 0;
+            state.renderCounter = 0;
+            state.statsWindowStartedAt = now;
+
+            if (state.dotNetRef) {
+                state.dotNetRef.invokeMethodAsync(
+                    "UpdateTelemetryGridStats",
+                    state.sensorCount,
+                    Math.round(state.ingestRateHz * 10) / 10,
+                    Math.round(state.renderRateFps * 10) / 10,
+                    state.droppedFrames,
+                    state.latestAlertCount,
+                    Math.round(state.latestCpuAveragePercent * 10) / 10,
+                    Math.round(state.latestPacketLossAveragePercent * 1000) / 1000,
+                    state.streamState,
+                    state.latestSequence
+                ).catch(() => {
+                    // Ignore callback failures during component teardown.
+                });
+            }
+        }
+
+        state.animationFrame = requestAnimationFrame(() => drawTelemetryGrid(state));
+    }
+
+    function renderTelemetryGridFrame(state, frame) {
+        const pixels = state.imageData.data;
+        const palette = state.palette;
+
+        for (let index = 0; index < state.sensorCount; index += 1) {
+            const pixelOffset = index * 4;
+            const paletteOffset = frame.intensities[index] * 4;
+            const alert = frame.alerts[index];
+
+            let red = palette[paletteOffset];
+            let green = palette[paletteOffset + 1];
+            let blue = palette[paletteOffset + 2];
+
+            if (alert === 1) {
+                red = Math.min(255, red + 36);
+                green = Math.min(255, green + 16);
+            } else if (alert >= 2) {
+                red = 255;
+                green = 104;
+                blue = 84;
+            }
+
+            pixels[pixelOffset] = red;
+            pixels[pixelOffset + 1] = green;
+            pixels[pixelOffset + 2] = blue;
+            pixels[pixelOffset + 3] = 255;
+        }
+
+        state.offscreenContext.putImageData(state.imageData, 0, 0);
+
+        const width = state.canvas.clientWidth;
+        const height = state.canvas.clientHeight;
+        const context = state.context;
+
+        context.save();
+        context.clearRect(0, 0, width, height);
+        context.imageSmoothingEnabled = false;
+        context.drawImage(state.offscreenCanvas, 0, 0, state.gridWidth, state.gridHeight, 0, 0, width, height);
+
+        context.fillStyle = "rgba(8, 14, 31, 0.56)";
+        context.fillRect(10, 10, 252, 52);
+        context.strokeStyle = "rgba(45, 246, 255, 0.32)";
+        context.lineWidth = 1;
+        context.strokeRect(10, 10, 252, 52);
+
+        context.fillStyle = "#f3f8ff";
+        context.font = "600 12px Consolas, monospace";
+        context.fillText(`SEQ ${frame.sequence} | ALERTS ${frame.alertCount}`, 18, 30);
+        context.fillText(`${state.gridWidth}x${state.gridHeight} SENSOR MESH`, 18, 48);
+        context.restore();
     }
 
     function createGlShader(gl, shaderType, source) {
@@ -1112,6 +1393,11 @@ void main() {
             stopMjpegDecoder(decoderId);
         }
 
+        const telemetryGridIds = Array.from(dashboardState.telemetryGridSessions.keys());
+        for (const telemetryGridId of telemetryGridIds) {
+            stopTelemetryGrid(telemetryGridId);
+        }
+
         const webrtcIds = Array.from(dashboardState.webrtcSessions.keys());
         for (const sessionId of webrtcIds) {
             stopWebRtcDiagnostics(sessionId);
@@ -1131,6 +1417,8 @@ void main() {
         startMjpegDecoder,
         setMjpegBoundaryCount,
         stopMjpegDecoder,
+        startTelemetryGrid,
+        stopTelemetryGrid,
         startWebRtcDiagnostics,
         stopWebRtcDiagnostics,
         disposeAll: disposeAllDashboard

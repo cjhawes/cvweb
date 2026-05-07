@@ -1,0 +1,30 @@
+@* FlipCard Documentation
+   - Front face renders a live 1024-sensor telemetry mesh directly on HTML5 Canvas.
+   - Back face documentation remains owned by the surrounding WidgetCard metadata in Dashboard.
+   - This component keeps UI markup in .razor while stream/canvas orchestration lives in TelemetryGrid.razor.cs.
+*@
+
+<div class="widget-status-row">
+    <span class="status-dot @StatusClass"></span>
+    <span>@StatusLabel</span>
+</div>
+
+<canvas id="@CanvasId"
+        class="telemetry-grid-canvas decoder-canvas"
+        width="960"
+        height="320"
+        aria-label="Synthetic telemetry grid showing 1024 IoT sensors"></canvas>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Sensors: @SensorCount.ToString("N0")</span>
+    <span class="metric-chip">Ingest: @IngestRateHz.ToString("0.0")Hz</span>
+    <span class="metric-chip">Render: @RenderRateFps.ToString("0.0")fps</span>
+    <span class="metric-chip">Dropped: @DroppedFrames.ToString("N0")</span>
+</div>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Alerts: @AlertSensors.ToString("N0")</span>
+    <span class="metric-chip">CPU Mean: @CpuAveragePercent.ToString("0.0")%</span>
+    <span class="metric-chip">Packet Loss Mean: @PacketLossAveragePercent.ToString("0.000")%</span>
+    <span class="metric-chip">Sequence: @LastSequence.ToString("N0")</span>
+</div>

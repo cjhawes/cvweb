@@ -659,6 +659,12 @@ a {
     object-fit: cover;
 }
 
+.telemetry-grid-canvas {
+    min-height: 240px;
+    max-height: 320px;
+    background: #061027;
+}
+
 .alert-feed {
     margin: 0;
     padding: 0;
@@ -837,6 +843,11 @@ a {
     .widget-card,
     .widget-card-inner {
         min-height: 390px;
+    }
+
+    .telemetry-grid-canvas {
+        min-height: 210px;
+        max-height: 260px;
     }
 
     .widget-metrics-grid {
