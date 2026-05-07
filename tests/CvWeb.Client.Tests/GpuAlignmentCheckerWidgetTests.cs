@@ -1,3 +1,4 @@
+using System.Globalization;
 using Bunit;
 using CvWeb.Client.Components.Widgets;
 
@@ -5,6 +6,12 @@ namespace CvWeb.Client.Tests;
 
 public sealed class GpuAlignmentCheckerWidgetTests
 {
+    public GpuAlignmentCheckerWidgetTests()
+    {
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+        CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
+    }
+
     [Fact]
     public void RendersInitializingStateByDefault()
     {
