@@ -1,0 +1,11 @@
+<div class="metric-chip-row">
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>
+    /// Gets or sets the metric chips to render in this row.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

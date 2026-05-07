@@ -1,236 +1,126 @@
 # CvWeb Architecture
 
-## Phase 1: MockStreamService Web Worker Data Pump
+## 1. System Overview
 
-### Objective
-Replace dashboard runtime dependencies on external API/SignalR endpoints with an in-browser, serverless data pump while preserving existing routing and UI layout.
+CvWeb is a browser-only Blazor WebAssembly system hosted as static assets.
 
-### Key Decisions
-- Introduced `IMockStreamService` and `MockStreamService` in `CvWeb.Client`.
-- Implemented bounded channel fan-out using `System.Threading.Channels` for:
-  - Telemetry stream
-  - MJPEG boundary/fps stream
-  - WebRTC profile metadata cache
-- Added dedicated client worker script `wwwroot/js/mock-stream.worker.js`.
-- Added JS bridge APIs in `wwwroot/js/site.js` to start/stop worker and forward worker payloads into C# service.
+- UI shell and widgets run in `src/CvWeb.Client`.
+- High-frequency synthetic runtime data is generated in `wwwroot/js/mock-stream.worker.js`.
+- JS interop orchestration is implemented in `wwwroot/js/site.js`.
+- No server-side API or SignalR backend is required at runtime.
 
-### Runtime Flow
-1. Dashboard route initializes and calls `MockStreamService.StartAsync()`.
-2. `MockStreamService` starts `mock-stream.worker.js` through JS interop.
-3. Worker emits telemetry, MJPEG, and WebRTC profile payloads.
-4. JS bridge forwards payloads to C# via `HandleWorkerMessage`.
-5. C# service deserializes and writes to bounded channels.
-6. Widgets subscribe to channel readers and render updates.
+## 2. Runtime Topology
 
-### Widget Integration
-- `SignalRTelemetryWidget` now consumes telemetry channel data.
-- `AlarmTriage` consumes raw telemetry JSON channel data for local categorization and priority alert grouping.
-- `MjpegCanvasWidget` now consumes MJPEG channel data and updates decoder boundary state through JS interop.
-- `WebRtcDiagnosticsWidget` now uses `IMockStreamService` for track profile metadata.
+### 2.1 Main Components
 
-### Deployment Path Safety
-- Worker URL is resolved relative to `document.baseURI`, ensuring compatibility with `/cvweb/` base href on GitHub Pages.
+- `Dashboard` page: starts/stops runtime sessions for the route.
+- `IMockStreamService` / `MockStreamService`: C# broker that fans worker payloads to widgets via bounded channels.
+- `cvDashboard` JS module: controls Web Worker lifecycle, WebGL, Canvas, and WebRTC probe sessions.
+- Widget components: render metrics and visuals; processing-heavy logic stays in services or JS loops.
 
-### Performance Notes
-- Bounded channels use `DropOldest` to prevent unbounded queue growth under bursty conditions.
-- Stream fan-out is non-blocking (`TryWrite`) to avoid producer stalls.
-- Worker message flow removes dashboard hard dependency on remote network endpoints for core telemetry simulation.
+### 2.2 Worker and Interop Flow
 
-## Phase 2: GPGPU Alignment Checker Widget
+1. `Dashboard` calls `MockStreams.StartAsync()`.
+2. `MockStreamService` invokes `cvDashboard.startMockStreamWorker`.
+3. Worker emits:
+   - telemetry payloads
+   - telemetry-grid frames
+   - MJPEG multipart byte chunks
+   - WebRTC track profile envelopes
+4. JS routes telemetry-grid frames directly into canvas session rings.
+5. JS forwards other payloads to `.NET` via `HandleWorkerMessage`.
+6. `MockStreamService` publishes bounded channel streams for subscribed widgets.
 
-### Objective
-Implement a byte-level 4K reference texture comparison widget using GPU fragment shading through C# JS interop while preserving the existing dashboard grid and card shell CSS.
+## 3. Active Widget Modules
 
-### Key Decisions
-- Added `GpuAlignmentChecker` as a new dashboard widget component with a `.razor` + `.razor.cs` split to keep UI and interop orchestration cleanly separated.
-- Added static 4K reference assets at:
-  - `src/CvWeb.Client/wwwroot/images/gpu-reference-a.svg`
-  - `src/CvWeb.Client/wwwroot/images/gpu-reference-b.svg`
-- Added `GpuAlignmentMetrics` service helper to keep drift/threshold logic deterministic and testable.
-- Extended `wwwroot/js/site.js` with:
-  - `startGpuAlignmentChecker`
-  - `stopGpuAlignmentChecker`
-  - disposal integration in `disposeAllDashboard`
+### 3.1 Project 01: GPGPU Alignment Checker
 
-### Runtime Flow
-1. `GpuAlignmentChecker` mounts and calls `cvDashboard.startGpuAlignmentChecker(...)`.
-2. JS creates a WebGL2 context and compiles the compare/preview fragment shader pipeline.
-3. Two static 4K textures are loaded, uploaded, and compared channel-by-channel in a GPU render pass.
-4. JS performs a single `readPixels` against the 4K mismatch buffer and computes:
-   - changed bytes
-   - mismatched pixels
-   - elapsed pass time
-5. Metrics are returned to C# through `[JSInvokable] UpdateGpuAlignmentResult(...)` and rendered in the widget.
-6. Widget disposal calls `cvDashboard.stopGpuAlignmentChecker(...)` to release shaders, buffers, textures, and framebuffer state.
+- Component: `GpuAlignmentChecker`
+- Pipeline: WebGL2 fragment compare pass over two static 4K reference textures.
+- Output: changed bytes, mismatched pixels, drift percent, elapsed pass time.
 
-### Performance Notes
-- GPU resources are created once per widget session and explicitly disposed on teardown.
-- Readback uses a reusable typed array buffer to avoid repeated allocations.
-- Shader compare uses nearest-neighbor sampling to preserve deterministic byte-level channel comparisons.
-- Dashboard card count and grid selectors are unchanged, preserving existing layout behavior.
+### 3.2 Project 02: Telemetry Stream Widget
 
-## Phase 3: Synthetic Telemetry Grid Canvas Widget
+- Component: `SignalRTelemetryWidget`
+- Data source: worker telemetry channel via `IMockStreamService.SubscribeTelemetry`.
+- Output: CPU/memory/loss chips and rolling sparkline.
 
-### Objective
-Implement a high-frequency telemetry engine widget that simulates 1,024 IoT sensors at 60Hz and renders directly to HTML5 Canvas without disrupting existing dashboard layout or card styling.
+### 3.3 Project 03: MJPEG Software Decoder
 
-### Key Decisions
-- Added `TelemetryGrid` widget as a `.razor` + `.razor.cs` pair to keep presentation and JS interop orchestration separated.
-- Extended `wwwroot/js/mock-stream.worker.js` with a new `telemetry-grid` stream:
-  - 32x32 sensor mesh (1,024 sensors)
-  - 60Hz frame cadence
-  - per-frame intensity, alert mask, and aggregate metrics
-- Extended `wwwroot/js/site.js` with:
-  - `startTelemetryGrid(canvasId, dotNetRef, gridWidth, gridHeight)`
-  - `stopTelemetryGrid(canvasId)`
-  - telemetry-grid routing from worker to renderer sessions
-  - disposal integration in `disposeAllDashboard`
-- Added additive CSS in `app.css` via `.telemetry-grid-canvas` without changing existing grid selectors.
+- Component: `MjpegDecoder`
+- Data source: `MjpegByteChunk` channel.
+- Decode strategy: boundary/header/content-length parsing in C# with bounded carry buffer.
+- Render strategy: fixed cadence draw loop to canvas via JS frame decode.
 
-### Circular Buffer Strategy
-- Each telemetry-grid session allocates a fixed ring buffer with 256 slots.
-- Each slot pre-allocates:
-  - `Uint8Array(1024)` for intensity values
-  - `Uint8Array(1024)` for alert flags
-- Write pointer advances via power-of-two masking (`index & 255`) for constant-time wrap-around.
-- When producers outrun rendering, the oldest slot is overwritten and a dropped-frame counter is incremented.
-- Renderer always consumes the newest slot and discards stale backlog to protect frame pacing.
+### 3.4 Project 04: AI Alarm Triage
 
-### Runtime Flow
-1. Dashboard starts `MockStreamService`, which starts the worker.
-2. Worker emits `telemetry-grid` frames at 60Hz.
-3. `site.js` routes `telemetry-grid` payloads directly into active telemetry-grid session rings.
-4. `requestAnimationFrame` loop paints the latest frame to Canvas using precomputed color palette and single `putImageData` + `drawImage` pass.
-5. Widget receives 1Hz summary stats via `[JSInvokable] UpdateTelemetryGridStats(...)` for status chips.
+- Component: `AlarmTriage`
+- Engine: `AlarmTriageEngine`
+- Data source: raw telemetry JSON channel.
+- Logic: weighted scoring, baseline anomaly boost, cluster grouping, debounce, token-bucket rate limiting.
 
-### Performance Notes
-- High-frequency telemetry-grid frames bypass per-frame `.NET` deserialization to reduce interop overhead.
-- Circular buffer memory is bounded and pre-allocated to avoid allocation churn under sustained 60Hz load.
-- Rendering uses Canvas pixel buffers instead of DOM node updates, keeping UI thread work predictable.
-- Existing dashboard routing and CSS grid behavior are preserved.
+### 3.5 Project 05: WebRTC Probe
 
-## Phase 4: Software MJPEG Decoder Widget
+- Component: `WebRtcProbe`
+- Engine: `WebRtcProbeMetricsEngine`
+- Data source: simulated peer connection stats sampled in JS and pushed to .NET.
+- Output: health score and rolling bitrate/loss/jitter chart polylines.
 
-### Objective
-Implement a browser-local MJPEG decoder that ingests raw multipart HTTP byte chunks from the worker, slices frame boundaries in Blazor, and paints decoded frames to Canvas at 30fps without using video tags.
+### 3.6 Project 06: Telemetry Grid
 
-### Key Decisions
-- Added `MjpegDecoder` widget as a `.razor` + `.razor.cs` pair to separate UI shell from byte-stream decode orchestration.
-- Replaced dashboard Project 03 rendering component with `MjpegDecoder` while preserving card layout and flip-card metadata flow.
-- Extended `IMockStreamService` and `MockStreamService` with `MjpegByteChunk` transport and subscription APIs.
-- Extended worker stream simulation (`mock-stream.worker.js`) to emit fragmented multipart MJPEG byte chunks (`mjpeg-byte-chunk`) with sequence/timestamp metadata.
+- Component: `TelemetryGrid`
+- Data source: telemetry-grid worker frames routed in JS.
+- Render strategy: fixed-size ring buffer (256 slots), latest-frame draw, stale backlog drop.
 
-### Byte-Slicing Strategy
-- Worker emits multipart payload segments with structure:
-  - boundary line (`--frame`)
-  - headers (`Content-Type`, `Content-Length`)
-  - header terminator (`\r\n\r\n`)
-  - synthetic JPEG bytes
-  - trailing CRLF
-- Decoder keeps a carry buffer for partial chunks and appends each incoming chunk.
-- Boundary parser scans byte spans for:
-  1. boundary marker
-  2. header terminator
-  3. content-length value
-  4. full frame payload availability
-- Complete frame payloads are enqueued; residual tail bytes are retained in carry for the next chunk.
+## 4. Performance and Memory Strategy
 
-### Synchronization Strategy
-- Ingest loop: consumes chunk channel continuously and extracts complete frames as they become available.
-- Render loop: fixed cadence (~30fps) to draw one latest frame to canvas.
-- Frame queue is bounded (max depth 4) to prevent UI stall under bursty chunk ingress.
-- When queue overflows, stale frames are dropped (drop-oldest) and widget status degrades until queue pressure stabilizes.
+- Bounded channels with `DropOldest` prevent unbounded growth under bursts.
+- Telemetry-grid render bypasses per-frame .NET marshalling for 60Hz stability.
+- MJPEG parser caps carry buffer growth and bounds queue depth.
+- Worker, WebRTC, GPU, canvas, and subscription sessions are disposed on route teardown.
+- `MockStreamService.StopAsync` and `DisposeAsync` guarantee worker stop attempt and reference disposal even under JS exceptions.
 
-### Runtime Flow
-1. Dashboard starts `MockStreamService` and worker.
-2. Worker emits `mjpeg-byte-chunk` envelopes with base64-encoded byte slices.
-3. `MockStreamService` decodes base64 and fans out `MjpegByteChunk` objects over bounded channels.
-4. `MjpegDecoder` parses multipart boundaries in C# and enqueues full frame payloads.
-5. Render loop calls JS interop draw routine to decode frame bytes and paint onto canvas.
+## 5. UI Composition and DRY Structure
 
-### Performance Notes
-- Byte chunk fanout uses bounded channels with `DropOldest` backpressure semantics.
-- Decoder parsing is span-oriented with carry buffer reuse to avoid unbounded stream growth.
-- Rendering is canvas-based and avoids DOM node churn or native `<video>` playback overhead.
+- `WidgetCard` is the shared flip-card shell.
+- Dashboard cards are rendered from a metadata list with `DynamicComponent`.
+- Shared UI primitives:
+  - `WidgetStatus`
+  - `MetricChip`
+  - `MetricChipRow`
+- Widgets retain component-specific rendering while reusing status/chip wrappers.
 
-## Phase 5: AI Alarm Triage Widget
+## 6. Testing Strategy
 
-### Objective
-Implement a browser-local alarm triage pipeline that intercepts noisy telemetry JSON messages from the Web Worker, groups spam-like anomalies, and publishes a clean, rate-limited `Priority Alerts` feed.
+- Unit tests (`xUnit`) cover service logic:
+  - `AlarmTriageEngine`
+  - `GpuAlignmentMetrics`
+  - `WebRtcProbeMetricsEngine`
+  - `MockStreamService`
+- Component tests (`bUnit`) cover active widgets and route-facing behavior.
 
-### Key Decisions
-- Added raw telemetry JSON stream fanout to `IMockStreamService`/`MockStreamService` via `TelemetryJsonSample`:
-  - `SubscribeTelemetryJson(...)`
-  - `telemetry` worker payloads are now forwarded as raw JSON and typed DTOs in parallel.
-- Added `AlarmTriageEngine` service for deterministic local categorization:
-  - weighted risk scoring
-  - rolling baseline anomaly boost
-  - deterministic category/trend clustering
-  - per-cluster burst grouping
-  - token-bucket rate limiting
-- Added `AlarmTriage` widget (`.razor` + `.razor.cs`) and replaced dashboard Project 04 component usage.
+## 7. Phase 6.5 Cleanup Outcomes
 
-### Aggregation & Debounce Strategy
-- Incoming telemetry events are parsed from raw JSON payloads to feature vectors (`cpu`, `memory`, `packetLoss`, `activeStreams`, `alertLevel`).
-- Risk score is computed with weighted normalization and a rolling z-score boost.
-- Events are grouped into deterministic clusters using:
-  - node
-  - category (`packet-loss-burst`, `cpu-saturation`, `memory-pressure`, `stream-contention`, `composite-anomaly`)
-  - trend (`rising`, `recovering`, `steady`)
-- Debounce behavior:
-  - trailing window (`1.2s`) merges bursty spam into grouped incidents.
-  - sustained burst cooldown (`2.0s`) emits periodic summaries for long-running noise.
-- Rate limiting:
-  - global token bucket (`2 alerts/sec`, burst `4`) caps feed output.
-  - overflowed incidents are counted as suppressed until tokens refill.
+### Removed legacy/orphaned artifacts
 
-### Runtime Flow
-1. Worker posts `telemetry` envelope.
-2. JS bridge forwards payload JSON to `MockStreamService.HandleWorkerMessage`.
-3. Service writes:
-   - typed telemetry (`TelemetrySignal`) for existing widgets
-   - raw telemetry JSON (`TelemetryJsonSample`) for `AlarmTriage`
-4. `AlarmTriage` consumes raw JSON, calls `AlarmTriageEngine`, and updates metric chips/feed.
-5. UI displays grouped, prioritized, and rate-limited alert rows.
+- Legacy widgets removed:
+  - `AiAlarmTriageWidget`
+  - `ImageDiffWidget`
+  - `MjpegCanvasWidget`
+  - `WebRtcDiagnosticsWidget`
+- Orphaned image assets removed:
+  - `camera-live.svg`
+  - `camera-reference.svg`
+- Backend scaffold removed:
+  - `src/CvWeb.DataPump`
+  - solution/workflow references to DataPump deployment wiring
 
-### Test Coverage
-- Added xUnit tests for `AlarmTriageEngine` grouping, suppression, and malformed JSON handling.
-- Added bUnit tests for `AlarmTriage` warm-up and debounced priority alert rendering.
-- Extended `MockStreamServiceTests` to verify raw telemetry JSON fanout.
+### Contract and interop cleanup
 
-## Phase 6: WebRTC Diagnostic Probe Widget
+- Removed obsolete `MjpegStreamSample` and `SubscribeMjpeg` stream path.
+- Removed legacy JS compatibility APIs not used by active components.
 
-### Objective
-Implement a WebRTC probe widget that runs a simulated peer connection, samples `RTCStatsReport` via JS interop, and renders real-time network health trends for bitrate, packet loss, and jitter.
+### Documentation and API hygiene
 
-### Key Decisions
-- Added `WebRtcProbe` widget as a `.razor` + `.razor.cs` pair to keep UI markup separate from WebRTC interop and metrics logic.
-- Added `WebRtcProbeStatsSample` DTO in `StreamModels.cs` as the JS-to-.NET mapping contract.
-- Added `WebRtcProbeMetricsEngine` for bounded metric windowing, polyline generation, and health score calculation.
-- Extended `wwwroot/js/site.js` with:
-  - `startWebRtcProbe(videoId, dotNetRef)`
-  - `stopWebRtcProbe(videoId)`
-  - `extractWebRtcProbeStats(stats, state)` for `RTCStatsReport` mapping
-- Kept compatibility wrappers for legacy `startWebRtcDiagnostics/stopWebRtcDiagnostics` JS APIs.
-
-### RTCStats Mapping Strategy
-- JS samples `receiver.getStats()` every 500ms and extracts:
-  - `inbound-rtp` (video): `bytesReceived`, `packetsReceived`, `packetsLost`, `jitter`, `framesPerSecond`
-  - selected `candidate-pair`: `currentRoundTripTime`, `availableIncomingBitrate`
-- Derived metrics before interop:
-  - bitrate: byte-delta over stats timestamp delta
-  - packet loss percent: `packetsLost / (packetsLost + packetsReceived)`
-  - jitter ms: `jitter * 1000`
-- A compact sample object is sent to `[JSInvokable] UpdateWebRtcProbeStats(WebRtcProbeStatsSample sample)`.
-
-### Runtime Flow
-1. `WebRtcProbe` mounts and calls `cvDashboard.startWebRtcProbe(...)`.
-2. JS creates sender/receiver `RTCPeerConnection` instances and loops back a synthetic canvas stream.
-3. JS samples `RTCStatsReport` and maps raw reports to a typed probe payload.
-4. C# receives samples, updates bounded metric windows, computes health score, and re-renders chart polylines.
-5. Disposal calls `cvDashboard.stopWebRtcProbe(...)` and tears down media tracks, timers, and peer connections.
-
-### Performance Notes
-- Stats mapping runs in JS to minimize .NET interop payload size and callback frequency.
-- Probe history uses fixed-size windows in `WebRtcProbeMetricsEngine` to prevent unbounded allocations.
-- Chart geometry is generated from bounded windows, avoiding DOM-heavy rendering patterns.
+- Public client-side APIs now include XML documentation comments.
+- README and architecture docs now describe the implemented browser-only runtime.

@@ -1,20 +1,17 @@
 @implements IAsyncDisposable
 @inject IMockStreamService MockStreams
 
-<div class="widget-status-row">
-    <span class="status-dot @ConnectionClass"></span>
-    <span>@ConnectionLabel</span>
-</div>
+<WidgetStatus StatusClass="@ConnectionClass" Label="@ConnectionLabel" />
 
 <svg class="telemetry-chart" viewBox="0 0 240 100" preserveAspectRatio="none" role="img" aria-label="Telemetry chart">
     <polyline points="@SparklinePoints" class="telemetry-line" />
 </svg>
 
-<div class="metric-chip-row">
-    <span class="metric-chip">CPU: @LatestCpu.ToString("0.0")%</span>
-    <span class="metric-chip">Memory: @LatestMemory.ToString("0.0")%</span>
-    <span class="metric-chip">Packet Loss: @LatestPacketLoss.ToString("0.00")%</span>
-</div>
+<MetricChipRow>
+    <MetricChip Text="@($"CPU: {LatestCpu:0.0}%")" />
+    <MetricChip Text="@($"Memory: {LatestMemory:0.0}%")" />
+    <MetricChip Text="@($"Packet Loss: {LatestPacketLoss:0.00}%")" />
+</MetricChipRow>
 
 @code {
     private const int MaxPoints = 40;
@@ -61,6 +58,9 @@
         _streamTask = ConsumeTelemetryAsync(telemetryReader, _streamCts.Token);
     }
 
+    /// <summary>
+    /// Cancels telemetry subscriptions and releases local cancellation resources.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _streamCts.Cancel();

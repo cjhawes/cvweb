@@ -3,6 +3,9 @@ using Microsoft.JSInterop;
 
 namespace CvWeb.Client.Components.Widgets;
 
+/// <summary>
+/// Renders high-frequency synthetic telemetry grid statistics from JS worker sessions.
+/// </summary>
 public sealed partial class TelemetryGrid : IAsyncDisposable
 {
     private readonly string CanvasId = $"telemetry-grid-{Guid.NewGuid():N}";
@@ -56,6 +59,19 @@ public sealed partial class TelemetryGrid : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Applies telemetry grid summary statistics pushed from JavaScript.
+    /// </summary>
+    /// <param name="sensorCount">The number of sensors in the grid.</param>
+    /// <param name="ingestRateHz">The observed ingest rate in hertz.</param>
+    /// <param name="renderRateFps">The observed render frame rate.</param>
+    /// <param name="droppedFrames">The count of dropped frames.</param>
+    /// <param name="alertSensors">The number of sensors in alert state.</param>
+    /// <param name="cpuAveragePercent">The average CPU percentage.</param>
+    /// <param name="packetLossAveragePercent">The average packet-loss percentage.</param>
+    /// <param name="streamState">The stream state label.</param>
+    /// <param name="sequence">The latest worker sequence number.</param>
+    /// <returns>A task that completes after state has been updated.</returns>
     [JSInvokable]
     public Task UpdateTelemetryGridStats(
         int sensorCount,
@@ -81,6 +97,9 @@ public sealed partial class TelemetryGrid : IAsyncDisposable
         return InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>
+    /// Stops telemetry grid rendering and releases JS interop references.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         try

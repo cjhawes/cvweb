@@ -4,6 +4,9 @@ using Microsoft.JSInterop;
 
 namespace CvWeb.Client.Services;
 
+/// <summary>
+/// Provides an in-browser synthetic stream broker backed by a Web Worker.
+/// </summary>
 public sealed class MockStreamService : IMockStreamService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -30,14 +33,6 @@ public sealed class MockStreamService : IMockStreamService
             FullMode = BoundedChannelFullMode.DropOldest
         });
 
-    private readonly Channel<MjpegStreamSample> _mjpegIngress = Channel.CreateBounded<MjpegStreamSample>(
-        new BoundedChannelOptions(512)
-        {
-            SingleReader = true,
-            SingleWriter = false,
-            FullMode = BoundedChannelFullMode.DropOldest
-        });
-
     private readonly Channel<MjpegByteChunk> _mjpegByteIngress = Channel.CreateBounded<MjpegByteChunk>(
         new BoundedChannelOptions(1024)
         {
@@ -48,162 +43,157 @@ public sealed class MockStreamService : IMockStreamService
 
     private readonly List<Channel<TelemetrySignal>> _telemetrySubscribers = [];
     private readonly List<Channel<TelemetryJsonSample>> _telemetryJsonSubscribers = [];
-    private readonly List<Channel<MjpegStreamSample>> _mjpegSubscribers = [];
     private readonly List<Channel<MjpegByteChunk>> _mjpegByteSubscribers = [];
+    private readonly List<CancellationTokenRegistration> _subscriberCancellationRegistrations = [];
     private readonly Dictionary<string, WebRtcTrackEnvelope> _webrtcProfiles = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _fanoutCts = new();
     private readonly Task _telemetryFanoutTask;
     private readonly Task _telemetryJsonFanoutTask;
-    private readonly Task _mjpegFanoutTask;
     private readonly Task _mjpegByteFanoutTask;
 
     private DotNetObjectReference<MockStreamService>? _dotNetReference;
     private bool _isStarted;
+    private bool _isDisposed;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MockStreamService"/> class.
+    /// </summary>
+    /// <param name="js">The JS runtime used to start and stop worker sessions.</param>
     public MockStreamService(IJSRuntime js)
     {
         _js = js;
 
         _telemetryFanoutTask = Task.Run(() => TelemetryFanOutAsync(_fanoutCts.Token));
         _telemetryJsonFanoutTask = Task.Run(() => TelemetryJsonFanOutAsync(_fanoutCts.Token));
-        _mjpegFanoutTask = Task.Run(() => MjpegFanOutAsync(_fanoutCts.Token));
         _mjpegByteFanoutTask = Task.Run(() => MjpegByteFanOutAsync(_fanoutCts.Token));
     }
 
+    /// <inheritdoc />
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
+        DotNetObjectReference<MockStreamService>? referenceToStart;
+
         lock (_sync)
         {
+            ThrowIfDisposed();
+
             if (_isStarted)
             {
                 return;
             }
 
-            _dotNetReference = DotNetObjectReference.Create(this);
+            referenceToStart = DotNetObjectReference.Create(this);
+            _dotNetReference = referenceToStart;
             _isStarted = true;
         }
 
-        await _js.InvokeVoidAsync("cvDashboard.startMockStreamWorker", cancellationToken, _dotNetReference);
+        try
+        {
+            await _js.InvokeVoidAsync("cvDashboard.startMockStreamWorker", cancellationToken, referenceToStart);
+        }
+        catch
+        {
+            lock (_sync)
+            {
+                if (ReferenceEquals(_dotNetReference, referenceToStart))
+                {
+                    _dotNetReference = null;
+                    _isStarted = false;
+                }
+            }
+
+            referenceToStart.Dispose();
+            throw;
+        }
     }
 
+    /// <inheritdoc />
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         DotNetObjectReference<MockStreamService>? referenceToDispose = null;
-        var shouldStop = false;
+        var shouldStopWorker = false;
 
         lock (_sync)
         {
+            if (_isDisposed)
+            {
+                return;
+            }
+
             if (_isStarted)
             {
-                shouldStop = true;
+                shouldStopWorker = true;
                 _isStarted = false;
                 referenceToDispose = _dotNetReference;
                 _dotNetReference = null;
             }
         }
 
-        if (!shouldStop)
+        if (!shouldStopWorker)
         {
             return;
         }
 
-        await _js.InvokeVoidAsync("cvDashboard.stopMockStreamWorker", cancellationToken);
-        referenceToDispose?.Dispose();
+        try
+        {
+            await _js.InvokeVoidAsync("cvDashboard.stopMockStreamWorker", cancellationToken);
+        }
+        finally
+        {
+            referenceToDispose?.Dispose();
+        }
     }
 
+    /// <inheritdoc />
     public ChannelReader<TelemetrySignal> SubscribeTelemetry(CancellationToken cancellationToken = default)
     {
-        var channel = Channel.CreateBounded<TelemetrySignal>(
-            new BoundedChannelOptions(128)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.DropOldest
-            });
+        var channel = CreateSubscriberChannel<TelemetrySignal>(128);
 
         lock (_sync)
         {
+            ThrowIfDisposed();
             _telemetrySubscribers.Add(channel);
         }
 
-        if (cancellationToken.CanBeCanceled)
-        {
-            _ = RemoveTelemetrySubscriberOnCancelAsync(channel, cancellationToken);
-        }
+        RegisterCancellation(channel, _telemetrySubscribers, cancellationToken);
 
         return channel.Reader;
     }
 
+    /// <inheritdoc />
     public ChannelReader<TelemetryJsonSample> SubscribeTelemetryJson(CancellationToken cancellationToken = default)
     {
-        var channel = Channel.CreateBounded<TelemetryJsonSample>(
-            new BoundedChannelOptions(128)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.DropOldest
-            });
+        var channel = CreateSubscriberChannel<TelemetryJsonSample>(128);
 
         lock (_sync)
         {
+            ThrowIfDisposed();
             _telemetryJsonSubscribers.Add(channel);
         }
 
-        if (cancellationToken.CanBeCanceled)
-        {
-            _ = RemoveTelemetryJsonSubscriberOnCancelAsync(channel, cancellationToken);
-        }
+        RegisterCancellation(channel, _telemetryJsonSubscribers, cancellationToken);
 
         return channel.Reader;
     }
 
-    public ChannelReader<MjpegStreamSample> SubscribeMjpeg(CancellationToken cancellationToken = default)
-    {
-        var channel = Channel.CreateBounded<MjpegStreamSample>(
-            new BoundedChannelOptions(128)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.DropOldest
-            });
-
-        lock (_sync)
-        {
-            _mjpegSubscribers.Add(channel);
-        }
-
-        if (cancellationToken.CanBeCanceled)
-        {
-            _ = RemoveMjpegSubscriberOnCancelAsync(channel, cancellationToken);
-        }
-
-        return channel.Reader;
-    }
-
+    /// <inheritdoc />
     public ChannelReader<MjpegByteChunk> SubscribeMjpegByteChunks(CancellationToken cancellationToken = default)
     {
-        var channel = Channel.CreateBounded<MjpegByteChunk>(
-            new BoundedChannelOptions(256)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.DropOldest
-            });
+        var channel = CreateSubscriberChannel<MjpegByteChunk>(256);
 
         lock (_sync)
         {
+            ThrowIfDisposed();
             _mjpegByteSubscribers.Add(channel);
         }
 
-        if (cancellationToken.CanBeCanceled)
-        {
-            _ = RemoveMjpegByteSubscriberOnCancelAsync(channel, cancellationToken);
-        }
+        RegisterCancellation(channel, _mjpegByteSubscribers, cancellationToken);
 
         return channel.Reader;
     }
 
+    /// <inheritdoc />
     public ValueTask<WebRtcTrackEnvelope> GetWebRtcTrackProfileAsync(string profile, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -221,6 +211,12 @@ public sealed class MockStreamService : IMockStreamService
         return ValueTask.FromResult(BuildFallbackProfile(safeProfile));
     }
 
+    /// <summary>
+    /// Handles a worker message and publishes supported payloads into bounded ingress channels.
+    /// </summary>
+    /// <param name="messageType">The worker message type discriminator.</param>
+    /// <param name="payloadJson">The serialized payload.</param>
+    /// <returns>A completed value task.</returns>
     [JSInvokable]
     public ValueTask HandleWorkerMessage(string messageType, string payloadJson)
     {
@@ -243,16 +239,6 @@ public sealed class MockStreamService : IMockStreamService
                     if (signal is not null)
                     {
                         _telemetryIngress.Writer.TryWrite(signal);
-                    }
-
-                    break;
-                }
-                case "mjpeg":
-                {
-                    var sample = JsonSerializer.Deserialize<MjpegStreamSample>(payloadJson, JsonOptions);
-                    if (sample is not null)
-                    {
-                        _mjpegIngress.Writer.TryWrite(sample);
                     }
 
                     break;
@@ -293,38 +279,93 @@ public sealed class MockStreamService : IMockStreamService
         return ValueTask.CompletedTask;
     }
 
+    /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        try
+        DotNetObjectReference<MockStreamService>? referenceToDispose;
+        CancellationTokenRegistration[] registrations;
+        Channel<TelemetrySignal>[] telemetrySubscribers;
+        Channel<TelemetryJsonSample>[] telemetryJsonSubscribers;
+        Channel<MjpegByteChunk>[] mjpegByteSubscribers;
+        bool shouldStopWorker;
+
+        lock (_sync)
         {
-            await StopAsync();
-        }
-        catch (JSException)
-        {
-            // Ignore shutdown races where JS runtime is already detached.
-        }
-        catch (InvalidOperationException)
-        {
-            // Ignore shutdown races where JS runtime is unavailable.
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
+            shouldStopWorker = _isStarted;
+            _isStarted = false;
+
+            referenceToDispose = _dotNetReference;
+            _dotNetReference = null;
+
+            registrations = [.. _subscriberCancellationRegistrations];
+            _subscriberCancellationRegistrations.Clear();
+
+            telemetrySubscribers = [.. _telemetrySubscribers];
+            _telemetrySubscribers.Clear();
+
+            telemetryJsonSubscribers = [.. _telemetryJsonSubscribers];
+            _telemetryJsonSubscribers.Clear();
+
+            mjpegByteSubscribers = [.. _mjpegByteSubscribers];
+            _mjpegByteSubscribers.Clear();
         }
 
-        _fanoutCts.Cancel();
+        foreach (var registration in registrations)
+        {
+            registration.Dispose();
+        }
+
+        if (shouldStopWorker)
+        {
+            try
+            {
+                await _js.InvokeVoidAsync("cvDashboard.stopMockStreamWorker");
+            }
+            catch (JSException)
+            {
+                // Ignore shutdown races where JS runtime is already detached.
+            }
+            catch (InvalidOperationException)
+            {
+                // Ignore shutdown races where JS runtime is unavailable.
+            }
+            finally
+            {
+                referenceToDispose?.Dispose();
+            }
+        }
+        else
+        {
+            referenceToDispose?.Dispose();
+        }
+
+        try
+        {
+            _fanoutCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ignore duplicate cancellation during shutdown.
+        }
 
         _telemetryIngress.Writer.TryComplete();
         _telemetryJsonIngress.Writer.TryComplete();
-        _mjpegIngress.Writer.TryComplete();
         _mjpegByteIngress.Writer.TryComplete();
 
-        CompleteSubscribers(_telemetrySubscribers);
-        CompleteSubscribers(_telemetryJsonSubscribers);
-        CompleteSubscribers(_mjpegSubscribers);
-        CompleteSubscribers(_mjpegByteSubscribers);
+        CompleteSubscribers(telemetrySubscribers);
+        CompleteSubscribers(telemetryJsonSubscribers);
+        CompleteSubscribers(mjpegByteSubscribers);
 
         try
         {
             await _telemetryFanoutTask;
             await _telemetryJsonFanoutTask;
-            await _mjpegFanoutTask;
             await _mjpegByteFanoutTask;
         }
         catch (OperationCanceledException)
@@ -335,81 +376,52 @@ public sealed class MockStreamService : IMockStreamService
         _fanoutCts.Dispose();
     }
 
-    private static void CompleteSubscribers<T>(List<Channel<T>> subscribers)
+    private void RegisterCancellation<T>(Channel<T> channel, List<Channel<T>> subscribers, CancellationToken cancellationToken)
+    {
+        if (!cancellationToken.CanBeCanceled)
+        {
+            return;
+        }
+
+        var registration = cancellationToken.Register(() =>
+        {
+            lock (_sync)
+            {
+                subscribers.Remove(channel);
+            }
+
+            channel.Writer.TryComplete();
+        });
+
+        lock (_sync)
+        {
+            if (_isDisposed)
+            {
+                registration.Dispose();
+                channel.Writer.TryComplete();
+                return;
+            }
+
+            _subscriberCancellationRegistrations.Add(registration);
+        }
+    }
+
+    private static Channel<T> CreateSubscriberChannel<T>(int capacity)
+    {
+        return Channel.CreateBounded<T>(
+            new BoundedChannelOptions(capacity)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropOldest
+            });
+    }
+
+    private static void CompleteSubscribers<T>(IEnumerable<Channel<T>> subscribers)
     {
         foreach (var subscriber in subscribers)
         {
             subscriber.Writer.TryComplete();
-        }
-
-        subscribers.Clear();
-    }
-
-    private async Task RemoveTelemetrySubscriberOnCancelAsync(Channel<TelemetrySignal> channel, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            lock (_sync)
-            {
-                _telemetrySubscribers.Remove(channel);
-            }
-
-            channel.Writer.TryComplete();
-        }
-    }
-
-    private async Task RemoveTelemetryJsonSubscriberOnCancelAsync(Channel<TelemetryJsonSample> channel, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            lock (_sync)
-            {
-                _telemetryJsonSubscribers.Remove(channel);
-            }
-
-            channel.Writer.TryComplete();
-        }
-    }
-
-    private async Task RemoveMjpegSubscriberOnCancelAsync(Channel<MjpegStreamSample> channel, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            lock (_sync)
-            {
-                _mjpegSubscribers.Remove(channel);
-            }
-
-            channel.Writer.TryComplete();
-        }
-    }
-
-    private async Task RemoveMjpegByteSubscriberOnCancelAsync(Channel<MjpegByteChunk> channel, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            lock (_sync)
-            {
-                _mjpegByteSubscribers.Remove(channel);
-            }
-
-            channel.Writer.TryComplete();
         }
     }
 
@@ -438,23 +450,6 @@ public sealed class MockStreamService : IMockStreamService
             lock (_sync)
             {
                 subscribers = [.. _telemetryJsonSubscribers];
-            }
-
-            foreach (var subscriber in subscribers)
-            {
-                _ = subscriber.Writer.TryWrite(sample);
-            }
-        }
-    }
-
-    private async Task MjpegFanOutAsync(CancellationToken cancellationToken)
-    {
-        await foreach (var sample in _mjpegIngress.Reader.ReadAllAsync(cancellationToken))
-        {
-            Channel<MjpegStreamSample>[] subscribers;
-            lock (_sync)
-            {
-                subscribers = [.. _mjpegSubscribers];
             }
 
             foreach (var subscriber in subscribers)
@@ -497,6 +492,14 @@ public sealed class MockStreamService : IMockStreamService
         catch (FormatException)
         {
             return false;
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_isDisposed)
+        {
+            throw new ObjectDisposedException(nameof(MockStreamService));
         }
     }
 

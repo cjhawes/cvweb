@@ -1,45 +1,33 @@
 # CvWeb
 
-CvWeb is a two-tier portfolio application built with .NET 10.
+CvWeb is a Blazor WebAssembly portfolio application that runs entirely in the browser.
 
-- Tier 1: a CV-first Blazor WebAssembly landing page
-- Tier 2: a live technical dashboard backed by synthetic telemetry, MJPEG, and WebRTC diagnostics
+The project presents a CV-first landing page and a live engineering dashboard where all telemetry, MJPEG slicing, and diagnostics are generated client-side through a browser Web Worker.
 
 ## Architecture
 
 - Frontend SPA: `src/CvWeb.Client`
-- Backend Data Pump API: `src/CvWeb.DataPump`
+- Synthetic stream backend: `src/CvWeb.Client/wwwroot/js/mock-stream.worker.js`
 - Solution entry: `CvWeb.slnx`
 
-## Features
+Runtime model:
 
-### CV and Portfolio Landing (`/`)
+1. `Dashboard` starts `IMockStreamService`.
+2. `MockStreamService` starts the worker via JS interop.
+3. Worker emits telemetry, MJPEG byte chunks, WebRTC profile data, and telemetry-grid frames.
+4. JS routes high-frequency canvas streams directly to render loops and forwards typed payloads into .NET.
+5. Widgets render bounded, local state with explicit disposal on route exit.
 
-- Cinematic visual direction and motion system
-- Structured CV content with career outcomes and technical toolkit
-- Responsive hero and profile snapshot layout
-- Navigation to live portfolio dashboard
-
-### Live Dashboard (`/dashboard` and `/control-room`)
+## Dashboard Widgets
 
 - Project 01: GPGPU 4K byte-level alignment checker
-- Project 02: SignalR telemetry sparkline and health chips
-- Project 03: MJPEG boundary decoder on canvas
-- Project 04: Browser-local alarm triage model
-- Project 05: WebRTC diagnostics and frame health
+- Project 02: Worker telemetry sparkline and health chips
+- Project 03: Software MJPEG multipart decoder (byte chunk slicing in C#)
+- Project 04: Browser-local AI alarm triage (scoring, debounce, token-bucket rate limit)
+- Project 05: WebRTC probe (RTC stats mapping, health scoring, rolling charts)
+- Project 06: 1,024-sensor telemetry grid at 60Hz with fixed-size ring buffer rendering
 
-Each widget is wrapped in a flip-card that shows challenge, solution, stack, and source link.
-
-### Data Pump API
-
-Core endpoints:
-
-- `GET /api/health`
-- `GET /api/telemetry?node=edge-gateway-a&samples=24`
-- `GET /api/video/frame-meta?width=1920&height=1080&fps=30`
-- `GET /api/webrtc/tracks?profile=balanced`
-- `GET /api/mjpeg/stream?fps=30`
-- SignalR hub: `/hubs/telemetry`
+Each widget is wrapped by `WidgetCard` (flip-card) metadata for challenge, solution, stack, and source references.
 
 ## Local Development
 
@@ -48,37 +36,32 @@ From repository root:
 ```bash
 dotnet restore CvWeb.slnx --configfile NuGet.Config
 dotnet build CvWeb.slnx --configuration Release
-dotnet run --project src/CvWeb.DataPump
+dotnet test tests/CvWeb.Client.Tests/CvWeb.Client.Tests.csproj --configuration Release
 dotnet run --project src/CvWeb.Client
 ```
 
-Default local addresses:
+Default local address:
 
 - Client: `http://localhost:5205`
-- Data Pump: `http://localhost:5094`
 
 ## CI/CD
 
 - CI workflow: `.github/workflows/ci.yml`
 - GitHub Pages deploy workflow: `.github/workflows/deploy-client-pages.yml`
 
-The deploy workflow:
+Deployment workflow steps:
 
-1. Publishes Blazor static assets
-2. Rewrites base href to `/cvweb/`
-3. Applies `DATAPUMP_BASE_URL` when configured
-4. Creates `404.html` SPA fallback
-5. Deploys to GitHub Pages
+1. Publish Blazor static assets.
+2. Rewrite base href to `/cvweb/`.
+3. Generate `404.html` SPA fallback.
+4. Deploy to GitHub Pages.
 
-## Hosting
-
-Published frontend target:
+Published target:
 
 - `https://cjhawes.github.io/cvweb/`
 
-Backend can be hosted on any ASP.NET Core-capable service.
-
 ## Documentation
 
+- System architecture: `docs/ARCHITECTURE.md`
 - Developer handbook: `docs/developer-guide.md`
-- Hosting runbook: `docs/hosting.md`
+- Hosting notes: `docs/hosting.md`

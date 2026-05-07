@@ -3,14 +3,35 @@ using System.Text;
 
 namespace CvWeb.Client.Services;
 
+/// <summary>
+/// Identifies the metric series used by the WebRTC probe charts.
+/// </summary>
 public enum WebRtcSeriesMetric
 {
+    /// <summary>
+    /// Bitrate series.
+    /// </summary>
     Bitrate,
+
+    /// <summary>
+    /// Packet-loss series.
+    /// </summary>
     PacketLoss,
+
+    /// <summary>
+    /// Jitter series.
+    /// </summary>
     Jitter,
+
+    /// <summary>
+    /// Frame-rate series.
+    /// </summary>
     FramesPerSecond
 }
 
+/// <summary>
+/// Maintains fixed-capacity windows and derived metrics for WebRTC probe visualization.
+/// </summary>
 public sealed class WebRtcProbeMetricsEngine
 {
     private readonly int _capacity;
@@ -22,6 +43,10 @@ public sealed class WebRtcProbeMetricsEngine
     private int _nextIndex;
     private int _count;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WebRtcProbeMetricsEngine"/> class.
+    /// </summary>
+    /// <param name="capacity">The fixed sample capacity for each metric window.</param>
     public WebRtcProbeMetricsEngine(int capacity = 120)
     {
         if (capacity < 16)
@@ -36,10 +61,20 @@ public sealed class WebRtcProbeMetricsEngine
         _fpsWindow = new double[_capacity];
     }
 
+    /// <summary>
+    /// Gets the number of currently buffered samples.
+    /// </summary>
     public int Count => _count;
 
+    /// <summary>
+    /// Gets the maximum number of samples retained in the rolling window.
+    /// </summary>
     public int Capacity => _capacity;
 
+    /// <summary>
+    /// Pushes a WebRTC sample into all rolling metric windows.
+    /// </summary>
+    /// <param name="sample">The sample to append.</param>
     public void Push(WebRtcProbeStatsSample sample)
     {
         ArgumentNullException.ThrowIfNull(sample);
@@ -58,6 +93,11 @@ public sealed class WebRtcProbeMetricsEngine
         }
     }
 
+    /// <summary>
+    /// Computes a normalized network health score from a WebRTC sample.
+    /// </summary>
+    /// <param name="sample">The sample to evaluate.</param>
+    /// <returns>A score in the range 0 to 100.</returns>
     public double ComputeHealthScore(WebRtcProbeStatsSample sample)
     {
         ArgumentNullException.ThrowIfNull(sample);
@@ -70,6 +110,12 @@ public sealed class WebRtcProbeMetricsEngine
         return Math.Clamp(bitrateScore - lossPenalty - jitterPenalty - rttPenalty, 0d, 100d);
     }
 
+    /// <summary>
+    /// Gets the maximum value in the selected window using the provided fallback floor.
+    /// </summary>
+    /// <param name="metric">The metric window to query.</param>
+    /// <param name="fallback">The minimum fallback max value.</param>
+    /// <returns>The computed maximum value.</returns>
     public double GetWindowMax(WebRtcSeriesMetric metric, double fallback)
     {
         var safeFallback = Math.Max(0.001d, fallback);
@@ -94,6 +140,14 @@ public sealed class WebRtcProbeMetricsEngine
         return max;
     }
 
+    /// <summary>
+    /// Builds an SVG polyline point string from the selected metric window.
+    /// </summary>
+    /// <param name="metric">The metric window to render.</param>
+    /// <param name="width">The chart width.</param>
+    /// <param name="height">The chart height.</param>
+    /// <param name="scaleMax">The value mapped to the top of the chart.</param>
+    /// <returns>An SVG polyline points string.</returns>
     public string BuildPolyline(WebRtcSeriesMetric metric, double width, double height, double scaleMax)
     {
         if (_count == 0)

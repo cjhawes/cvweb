@@ -2,9 +2,7 @@ const state = {
     running: false,
     telemetryTimer: null,
     telemetryGridTimer: null,
-    mjpegTimer: null,
     mjpegByteTimer: null,
-    boundaryCount: 0,
     node: "edge-gateway-a",
     telemetryGrid: {
         width: 32,
@@ -304,7 +302,6 @@ function startWorker() {
     }
 
     state.running = true;
-    state.boundaryCount = 0;
     state.telemetryGrid.sequence = 0;
     state.mjpegByte.sequence = 0;
     state.mjpegByte.frameNumber = 0;
@@ -318,16 +315,6 @@ function startWorker() {
     state.telemetryGridTimer = self.setInterval(() => {
         postMessageEnvelope("telemetry-grid", buildTelemetryGridFrame(Date.now()));
     }, 1000 / 60);
-
-    state.mjpegTimer = self.setInterval(() => {
-        state.boundaryCount += 3 + (Math.random() > 0.82 ? 1 : 0);
-
-        postMessageEnvelope("mjpeg", {
-            boundaryCount: state.boundaryCount,
-            renderFps: 29 + Math.floor(Math.random() * 3),
-            timestamp: new Date().toISOString()
-        });
-    }, 100);
 
     state.mjpegByteTimer = self.setInterval(() => {
         emitFragmentedMultipartFrame(Date.now()).catch(() => {
@@ -351,11 +338,6 @@ function stopWorker() {
     if (state.telemetryGridTimer !== null) {
         self.clearInterval(state.telemetryGridTimer);
         state.telemetryGridTimer = null;
-    }
-
-    if (state.mjpegTimer !== null) {
-        self.clearInterval(state.mjpegTimer);
-        state.mjpegTimer = null;
     }
 
     if (state.mjpegByteTimer !== null) {

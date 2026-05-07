@@ -4,22 +4,19 @@
    - UI stays in .razor while scoring/grouping/debounce logic lives in AlarmTriage.razor.cs + AlarmTriageEngine.
 *@
 
-<div class="widget-status-row">
-    <span class="status-dot @StatusClass"></span>
-    <span>@ModelLabel</span>
-</div>
+<WidgetStatus StatusClass="@StatusClass" Label="@ModelLabel" />
 
-<div class="metric-chip-row">
-    <span class="metric-chip">Latest Score: @LatestScore.ToString("0.0")</span>
-    <span class="metric-chip">Buffered Clusters: @BufferedClusters</span>
-    <span class="metric-chip">Priority Alerts: @PublishedAlerts.ToString("N0")</span>
-    <span class="metric-chip">Suppressed: @SuppressedEvents.ToString("N0")</span>
-</div>
+<MetricChipRow>
+    <MetricChip Text="@($"Latest Score: {LatestScore:0.0}")" />
+    <MetricChip Text="@($"Buffered Clusters: {BufferedClusters}")" />
+    <MetricChip Text="@($"Priority Alerts: {PublishedAlerts:N0}")" />
+    <MetricChip Text="@($"Suppressed: {SuppressedEvents:N0}")" />
+</MetricChipRow>
 
-<div class="metric-chip-row">
-    <span class="metric-chip">Debounce: @DebounceLabel</span>
-    <span class="metric-chip">Rate Limit: @RateLimitLabel</span>
-</div>
+<MetricChipRow>
+    <MetricChip Text="@($"Debounce: {DebounceLabel}")" />
+    <MetricChip Text="@($"Rate Limit: {RateLimitLabel}")" />
+</MetricChipRow>
 
 <ul class="alert-feed priority-alert-feed">
     @if (Alerts.Count == 0)

@@ -32,21 +32,39 @@
 </article>
 
 @code {
+    /// <summary>
+    /// Gets or sets the widget title rendered on both faces of the card.
+    /// </summary>
     [Parameter, EditorRequired]
     public string Title { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the challenge summary shown on the back face.
+    /// </summary>
     [Parameter, EditorRequired]
     public string Challenge { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the solution summary shown on the back face.
+    /// </summary>
     [Parameter, EditorRequired]
     public string Solution { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the technology stack summary shown on the back face.
+    /// </summary>
     [Parameter, EditorRequired]
     public string Stack { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the source link for the widget implementation.
+    /// </summary>
     [Parameter, EditorRequired]
     public string SourceUrl { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the live widget content rendered on the front face.
+    /// </summary>
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
 

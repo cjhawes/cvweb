@@ -210,36 +210,6 @@
         landingState.animationFrame = requestAnimationFrame(animateParticleField);
     }
 
-    function concatUint8Arrays(a, b) {
-        const merged = new Uint8Array(a.length + b.length);
-        merged.set(a);
-        merged.set(b, a.length);
-        return merged;
-    }
-
-    function countPatternOccurrences(data, pattern) {
-        if (pattern.length === 0 || data.length < pattern.length) {
-            return 0;
-        }
-
-        let occurrences = 0;
-        for (let index = 0; index <= data.length - pattern.length; index += 1) {
-            let match = true;
-            for (let offset = 0; offset < pattern.length; offset += 1) {
-                if (data[index + offset] !== pattern[offset]) {
-                    match = false;
-                    break;
-                }
-            }
-
-            if (match) {
-                occurrences += 1;
-            }
-        }
-
-        return occurrences;
-    }
-
     function decodeBase64ToUint8Array(base64) {
         const binary = atob(base64);
         const bytes = new Uint8Array(binary.length);
@@ -1017,148 +987,6 @@ void main() {
         dashboardState.gpuAlignmentSessions.delete(canvasId);
     }
 
-    async function startMjpegDecoder(canvasId, streamUrl = "", dotNetRef = null) {
-        stopMjpegDecoder(canvasId);
-
-        const canvas = document.getElementById(canvasId);
-        if (!(canvas instanceof HTMLCanvasElement)) {
-            return;
-        }
-
-        const context = canvas.getContext("2d");
-        if (!context) {
-            return;
-        }
-
-        const state = {
-            canvas,
-            context,
-            dotNetRef,
-            streamUrl,
-            abortController: typeof streamUrl === "string" && streamUrl.length > 0 ? new AbortController() : null,
-            running: true,
-            boundaries: 0,
-            renderFps: 0,
-            frameCounter: 0,
-            lastFpsMeasure: performance.now(),
-            lastDraw: performance.now(),
-            animationFrame: null,
-            resizeHandler: null
-        };
-
-        state.resizeHandler = () => scaleCanvas(canvas, context);
-        window.addEventListener("resize", state.resizeHandler);
-        state.resizeHandler();
-
-        dashboardState.mjpegDecoders.set(canvasId, state);
-
-        drawMjpegFrame(state);
-
-        if (typeof streamUrl === "string" && streamUrl.length > 0) {
-            try {
-                const response = await fetch(streamUrl, {
-                    cache: "no-store",
-                    signal: state.abortController ? state.abortController.signal : undefined
-                });
-
-                if (!response.body) {
-                    return;
-                }
-
-                const marker = new TextEncoder().encode("--frame");
-                const reader = response.body.getReader();
-                let carry = new Uint8Array(0);
-
-                while (state.running) {
-                    const { done, value } = await reader.read();
-                    if (done || !value) {
-                        break;
-                    }
-
-                    const merged = concatUint8Arrays(carry, value);
-                    const matches = countPatternOccurrences(merged, marker);
-                    if (matches > 0) {
-                        state.boundaries += matches;
-                    }
-
-                    carry = merged.slice(Math.max(0, merged.length - marker.length + 1));
-                }
-            } catch {
-                // Ignore stream termination and transient network failures.
-            }
-        }
-    }
-
-    function drawMjpegFrame(state) {
-        if (!state.running) {
-            return;
-        }
-
-        const now = performance.now();
-        const frameGap = 1000 / 30;
-
-        if (now - state.lastDraw >= frameGap) {
-            state.lastDraw = now;
-            state.frameCounter += 1;
-
-            const ctx = state.context;
-            const width = state.canvas.clientWidth;
-            const height = state.canvas.clientHeight;
-            const pulse = (state.boundaries % 240) / 240;
-
-            const gradient = ctx.createLinearGradient(0, 0, width, height);
-            gradient.addColorStop(0, "#0d1b3d");
-            gradient.addColorStop(1, "#142a5d");
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0, 0, width, height);
-
-            const boundaryStripeWidth = 6 + Math.round(pulse * 16);
-            for (let i = 0; i < width; i += boundaryStripeWidth + 5) {
-                ctx.fillStyle = "rgba(45, 246, 255, 0.16)";
-                ctx.fillRect(i, 0, boundaryStripeWidth, height);
-            }
-
-            const waveformHeight = (Math.sin(now / 140) * 0.28 + 0.46) * height;
-            ctx.strokeStyle = "rgba(255, 127, 50, 0.9)";
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(0, waveformHeight);
-            for (let x = 0; x <= width; x += 8) {
-                const y = waveformHeight + Math.sin((x + now / 8) / 25) * 11;
-                ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-
-            ctx.fillStyle = "#f7fbff";
-            ctx.font = "600 14px Consolas, monospace";
-            ctx.fillText(`Frame Boundary #${state.boundaries}`, 16, 24);
-            ctx.fillText("Transport: multipart byte stream", 16, 44);
-        }
-
-        if (now - state.lastFpsMeasure >= 1000) {
-            state.renderFps = state.frameCounter;
-            state.frameCounter = 0;
-            state.lastFpsMeasure = now;
-
-            if (state.dotNetRef) {
-                state.dotNetRef.invokeMethodAsync("UpdateMjpegStats", state.boundaries, state.renderFps).catch(() => {
-                    // Ignore callback failures during component teardown.
-                });
-            }
-        }
-
-        state.animationFrame = requestAnimationFrame(() => drawMjpegFrame(state));
-    }
-
-    function setMjpegBoundaryCount(canvasId, boundaryCount) {
-        const state = dashboardState.mjpegDecoders.get(canvasId);
-        if (!state) {
-            return;
-        }
-
-        state.boundaries = Math.max(0, Math.floor(boundaryCount));
-    }
-
     function stopMjpegDecoder(canvasId) {
         const state = dashboardState.mjpegDecoders.get(canvasId);
         if (!state) {
@@ -1506,22 +1334,8 @@ void main() {
                 state.dotNetRef.invokeMethodAsync("UpdateWebRtcProbeStats", sample).catch(() => {
                     // Ignore callback failures during component teardown.
                 });
-
-                state.dotNetRef.invokeMethodAsync(
-                    "UpdateWebRtcStats",
-                    sample.framesPerSecond,
-                    sample.jitterMs,
-                    sample.packetLossPercent,
-                    sample.connectionState
-                ).catch(() => {
-                    // Legacy callback for compatibility with older diagnostics widget.
-                });
             }
         }, 500);
-    }
-
-    async function startWebRtcDiagnostics(videoId, dotNetRef) {
-        await startWebRtcProbe(videoId, dotNetRef);
     }
 
     function drawWebRtcProbeSource(state) {
@@ -1600,10 +1414,6 @@ void main() {
         dashboardState.webrtcSessions.delete(videoId);
     }
 
-    function stopWebRtcDiagnostics(videoId) {
-        stopWebRtcProbe(videoId);
-    }
-
     function disposeAllDashboard() {
         stopMockStreamWorker();
 
@@ -1638,17 +1448,13 @@ void main() {
         stopMockStreamWorker,
         startGpuAlignmentChecker,
         stopGpuAlignmentChecker,
-        startMjpegDecoder,
         initMjpegDecoderCanvas,
         drawMjpegFrameBytes,
-        setMjpegBoundaryCount,
         stopMjpegDecoder,
         startTelemetryGrid,
         stopTelemetryGrid,
         startWebRtcProbe,
         stopWebRtcProbe,
-        startWebRtcDiagnostics,
-        stopWebRtcDiagnostics,
         disposeAll: disposeAllDashboard
     };
 })();

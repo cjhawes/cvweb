@@ -5,10 +5,7 @@
 *@
 @implements IAsyncDisposable
 
-<div class="widget-status-row">
-    <span class="status-dot @StatusClass"></span>
-    <span>@StatusLabel</span>
-</div>
+<WidgetStatus StatusClass="@StatusClass" Label="@StatusLabel" />
 
 <canvas id="@CanvasId"
         class="decoder-canvas"
@@ -16,15 +13,15 @@
         height="540"
         aria-label="GPU byte-level mismatch heatmap preview"></canvas>
 
-<div class="metric-chip-row">
-    <span class="metric-chip">Backend: @BackendLabel</span>
-    <span class="metric-chip">Textures: @ResolutionLabel</span>
-    <span class="metric-chip">Compared: @ComparedBytes.ToString("N0")</span>
-</div>
+<MetricChipRow>
+    <MetricChip Text="@($"Backend: {BackendLabel}")" />
+    <MetricChip Text="@($"Textures: {ResolutionLabel}")" />
+    <MetricChip Text="@($"Compared: {ComparedBytes:N0}")" />
+</MetricChipRow>
 
-<div class="metric-chip-row">
-    <span class="metric-chip">Changed Bytes: @ChangedBytes.ToString("N0")</span>
-    <span class="metric-chip">Mismatched Pixels: @MismatchedPixels.ToString("N0")</span>
-    <span class="metric-chip @DriftClass">Drift: @DriftPercent.ToString("0.000")%</span>
-    <span class="metric-chip">Pass Time: @ElapsedMilliseconds.ToString("0.00")ms</span>
-</div>
+<MetricChipRow>
+    <MetricChip Text="@($"Changed Bytes: {ChangedBytes:N0}")" />
+    <MetricChip Text="@($"Mismatched Pixels: {MismatchedPixels:N0}")" />
+    <MetricChip CssClass="@DriftClass" Text="@($"Drift: {DriftPercent:0.000}%")" />
+    <MetricChip Text="@($"Pass Time: {ElapsedMilliseconds:0.00}ms")" />
+</MetricChipRow>

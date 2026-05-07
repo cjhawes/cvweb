@@ -61,7 +61,6 @@ public sealed class AlarmTriageWidgetTests
     {
         private readonly Channel<TelemetrySignal> _telemetry = Channel.CreateUnbounded<TelemetrySignal>();
         private readonly Channel<TelemetryJsonSample> _telemetryJson = Channel.CreateUnbounded<TelemetryJsonSample>();
-        private readonly Channel<MjpegStreamSample> _mjpeg = Channel.CreateUnbounded<MjpegStreamSample>();
         private readonly Channel<MjpegByteChunk> _mjpegByte = Channel.CreateUnbounded<MjpegByteChunk>();
 
         public ValueTask StartAsync(CancellationToken cancellationToken = default)
@@ -84,11 +83,6 @@ public sealed class AlarmTriageWidgetTests
             return _telemetryJson.Reader;
         }
 
-        public ChannelReader<MjpegStreamSample> SubscribeMjpeg(CancellationToken cancellationToken = default)
-        {
-            return _mjpeg.Reader;
-        }
-
         public ChannelReader<MjpegByteChunk> SubscribeMjpegByteChunks(CancellationToken cancellationToken = default)
         {
             return _mjpegByte.Reader;
@@ -107,7 +101,6 @@ public sealed class AlarmTriageWidgetTests
         {
             _telemetry.Writer.TryComplete();
             _telemetryJson.Writer.TryComplete();
-            _mjpeg.Writer.TryComplete();
             _mjpegByte.Writer.TryComplete();
             return ValueTask.CompletedTask;
         }
