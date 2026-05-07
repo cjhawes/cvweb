@@ -12,5 +12,7 @@ public interface IMockStreamService : IAsyncDisposable
 
     ChannelReader<MjpegStreamSample> SubscribeMjpeg(CancellationToken cancellationToken = default);
 
+    ChannelReader<MjpegByteChunk> SubscribeMjpegByteChunks(CancellationToken cancellationToken = default);
+
     ValueTask<WebRtcTrackEnvelope> GetWebRtcTrackProfileAsync(string profile, CancellationToken cancellationToken = default);
 }

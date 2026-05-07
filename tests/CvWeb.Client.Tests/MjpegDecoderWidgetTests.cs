@@ -1,57 +1,50 @@
-using System.Threading.Channels;
 using Bunit;
+using System.Threading.Channels;
 using CvWeb.Client.Components.Widgets;
 using CvWeb.Client.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.JSInterop;
 
 namespace CvWeb.Client.Tests;
 
-public sealed class SignalRTelemetryWidgetTests
+public sealed class MjpegDecoderWidgetTests
 {
     [Fact]
-    public void RendersConnectingStateBeforeStreamDataArrives()
+    public void RendersDecoderStatusAndMetricsShell()
     {
         using var context = new BunitContext();
-        var stream = new FakeMockStreamService();
-        context.Services.AddSingleton<IMockStreamService>(stream);
+        context.JSInterop.Mode = JSRuntimeMode.Loose;
+        context.Services.AddSingleton<IMockStreamService>(new FakeMockStreamService());
 
-        var component = context.Render<SignalRTelemetryWidget>();
+        var component = context.Render<MjpegDecoder>();
 
-        Assert.Contains("Connecting to stream...", component.Markup);
+        Assert.Contains("Transport: multipart byte stream", component.Markup);
+        Assert.Contains("Chunks: 0", component.Markup);
     }
 
     [Fact]
-    public async Task UpdatesMetricsAfterTelemetrySampleArrives()
+    public async Task UpdatesRenderMetricsViaInteropCallback()
     {
         using var context = new BunitContext();
-        var stream = new FakeMockStreamService();
-        context.Services.AddSingleton<IMockStreamService>(stream);
+        context.JSInterop.Mode = JSRuntimeMode.Loose;
+        context.Services.AddSingleton<IMockStreamService>(new FakeMockStreamService());
 
-        var component = context.Render<SignalRTelemetryWidget>();
+        var component = context.Render<MjpegDecoder>();
 
-        await stream.PublishTelemetryAsync(new TelemetrySignal(
-            "edge-gateway-a",
-            DateTimeOffset.UtcNow,
-            61.3,
-            70.4,
-            0.41,
-            29,
-            1));
+        await component.Instance.UpdateMjpegStats(boundaryCount: 12, renderFps: 30);
 
         component.WaitForAssertion(() =>
         {
-            Assert.Contains("CPU: 61.3%", component.Markup);
-            Assert.Contains("Memory: 70.4%", component.Markup);
-            Assert.Contains("Packet Loss: 0.41%", component.Markup);
-            Assert.Contains("Live stream: edge-gateway-a", component.Markup);
+            Assert.Contains("Boundaries: 12", component.Markup);
+            Assert.Contains("Render FPS: 30.0", component.Markup);
         });
     }
 
     private sealed class FakeMockStreamService : IMockStreamService
     {
+        private readonly Channel<MjpegByteChunk> _mjpegBytes = Channel.CreateUnbounded<MjpegByteChunk>();
         private readonly Channel<TelemetrySignal> _telemetry = Channel.CreateUnbounded<TelemetrySignal>();
         private readonly Channel<MjpegStreamSample> _mjpeg = Channel.CreateUnbounded<MjpegStreamSample>();
-        private readonly Channel<MjpegByteChunk> _mjpegByteChunks = Channel.CreateUnbounded<MjpegByteChunk>();
 
         public ValueTask StartAsync(CancellationToken cancellationToken = default)
         {
@@ -75,7 +68,7 @@ public sealed class SignalRTelemetryWidgetTests
 
         public ChannelReader<MjpegByteChunk> SubscribeMjpegByteChunks(CancellationToken cancellationToken = default)
         {
-            return _mjpegByteChunks.Reader;
+            return _mjpegBytes.Reader;
         }
 
         public ValueTask<WebRtcTrackEnvelope> GetWebRtcTrackProfileAsync(string profile, CancellationToken cancellationToken = default)
@@ -89,15 +82,10 @@ public sealed class SignalRTelemetryWidgetTests
 
         public ValueTask DisposeAsync()
         {
+            _mjpegBytes.Writer.TryComplete();
             _telemetry.Writer.TryComplete();
             _mjpeg.Writer.TryComplete();
-            _mjpegByteChunks.Writer.TryComplete();
             return ValueTask.CompletedTask;
-        }
-
-        public ValueTask PublishTelemetryAsync(TelemetrySignal signal)
-        {
-            return _telemetry.Writer.WriteAsync(signal);
         }
     }
 }

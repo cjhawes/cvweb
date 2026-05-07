@@ -240,6 +240,16 @@
         return occurrences;
     }
 
+    function decodeBase64ToUint8Array(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+
+        return bytes;
+    }
+
     function scaleCanvas(canvas, context) {
         const rect = canvas.getBoundingClientRect();
         const ratio = window.devicePixelRatio || 1;
@@ -1172,6 +1182,29 @@ void main() {
         dashboardState.mjpegDecoders.delete(canvasId);
     }
 
+    async function drawMjpegFrameBytes(canvasId, frameBase64) {
+        const state = dashboardState.mjpegDecoders.get(canvasId);
+        if (!state || typeof frameBase64 !== "string" || frameBase64.length === 0) {
+            return;
+        }
+
+        try {
+            const bytes = decodeBase64ToUint8Array(frameBase64);
+            const blob = new Blob([bytes], { type: "image/jpeg" });
+            const bitmap = await createImageBitmap(blob);
+
+            const ctx = state.context;
+            const width = state.canvas.clientWidth;
+            const height = state.canvas.clientHeight;
+
+            ctx.clearRect(0, 0, width, height);
+            ctx.drawImage(bitmap, 0, 0, width, height);
+            bitmap.close();
+        } catch {
+            // Ignore malformed frame bytes and transient decode failures.
+        }
+    }
+
     async function startWebRtcDiagnostics(videoId, dotNetRef) {
         stopWebRtcDiagnostics(videoId);
 
@@ -1412,6 +1445,7 @@ void main() {
         startGpuAlignmentChecker,
         stopGpuAlignmentChecker,
         startMjpegDecoder,
+        drawMjpegFrameBytes,
         setMjpegBoundaryCount,
         stopMjpegDecoder,
         startTelemetryGrid,

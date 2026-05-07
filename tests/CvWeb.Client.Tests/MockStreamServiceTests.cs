@@ -70,6 +70,29 @@ public sealed class MockStreamServiceTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public async Task HandleWorkerMessage_PublishesMjpegByteChunksToSubscribers()
+    {
+        await using var service = new MockStreamService(new NoopJsRuntime());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        var reader = service.SubscribeMjpegByteChunks(timeout.Token);
+        var payloadBytes = new byte[] { 0xff, 0xd8, 0x10, 0x20, 0x30, 0xff, 0xd9 };
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            sequence = 7,
+            timestamp = DateTimeOffset.UtcNow,
+            chunkBase64 = Convert.ToBase64String(payloadBytes)
+        });
+
+        await service.HandleWorkerMessage("mjpeg-byte-chunk", payload);
+
+        var streamed = await reader.ReadAsync(timeout.Token);
+        Assert.Equal(7, streamed.Sequence);
+        Assert.Equal(payloadBytes, streamed.ChunkBytes);
+    }
+
     private sealed class NoopJsRuntime : IJSRuntime
     {
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
