@@ -1,0 +1,50 @@
+@* FlipCard Documentation
+   - Front face renders a live simulated peer session and RTC health charts.
+   - Back face documentation remains owned by the surrounding WidgetCard metadata in Dashboard.
+   - This component keeps layout in .razor while WebRTC interop and metric processing stay in WebRtcProbe.razor.cs.
+*@
+
+<div class="widget-status-row">
+    <span class="status-dot @StatusClass"></span>
+    <span>@StatusLabel</span>
+</div>
+
+<video id="@VideoId" class="diagnostic-video" autoplay muted playsinline></video>
+
+<div class="metric-chip-row">
+    <span class="metric-chip @HealthChipClass">Health: @NetworkHealth.ToString("0.0")%</span>
+    <span class="metric-chip">Bitrate: @BitrateKbps.ToString("0.0") kbps</span>
+    <span class="metric-chip">Packet Loss: @PacketLossPercent.ToString("0.000")%</span>
+    <span class="metric-chip">Jitter: @JitterMs.ToString("0.0") ms</span>
+</div>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">RTT: @RoundTripTimeMs.ToString("0.0") ms</span>
+    <span class="metric-chip">FPS: @FramesPerSecond.ToString("0.0")</span>
+    <span class="metric-chip">Track Profile: @TrackProfile</span>
+    <span class="metric-chip">Tracks: @TrackCount</span>
+    <span class="metric-chip">Sequence: @LastSequence.ToString("N0")</span>
+</div>
+
+<div class="webrtc-chart-grid">
+    <section class="webrtc-chart-panel">
+        <header class="webrtc-chart-header">Bitrate (kbps)</header>
+        <svg class="telemetry-chart webrtc-chart" viewBox="0 0 320 92" preserveAspectRatio="none" role="img" aria-label="WebRTC bitrate history">
+            <polyline points="@BitratePoints" class="webrtc-line webrtc-line-bitrate" />
+        </svg>
+    </section>
+
+    <section class="webrtc-chart-panel">
+        <header class="webrtc-chart-header">Packet Loss (%)</header>
+        <svg class="telemetry-chart webrtc-chart" viewBox="0 0 320 92" preserveAspectRatio="none" role="img" aria-label="WebRTC packet loss history">
+            <polyline points="@PacketLossPoints" class="webrtc-line webrtc-line-loss" />
+        </svg>
+    </section>
+
+    <section class="webrtc-chart-panel">
+        <header class="webrtc-chart-header">Jitter (ms)</header>
+        <svg class="telemetry-chart webrtc-chart" viewBox="0 0 320 92" preserveAspectRatio="none" role="img" aria-label="WebRTC jitter history">
+            <polyline points="@JitterPoints" class="webrtc-line webrtc-line-jitter" />
+        </svg>
+    </section>
+</div>

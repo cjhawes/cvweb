@@ -35,3 +35,22 @@ public sealed record WebRtcTrack(
     int? MaxBitrateKbps,
     int? TargetFps,
     string Purpose);
+
+public sealed class WebRtcProbeStatsSample
+{
+    public long Sequence { get; set; }
+
+    public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
+
+    public double BitrateKbps { get; set; }
+
+    public double PacketLossPercent { get; set; }
+
+    public double JitterMs { get; set; }
+
+    public double RoundTripTimeMs { get; set; }
+
+    public double FramesPerSecond { get; set; }
+
+    public string ConnectionState { get; set; } = "connecting";
+}
