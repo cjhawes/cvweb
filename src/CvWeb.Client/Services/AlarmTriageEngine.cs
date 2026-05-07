@@ -618,40 +618,40 @@ public sealed class AlarmTriageEngine
 
     private sealed class ClusterState
     {
-        internal ClusterState(string node, string category, string trend)
+        public ClusterState(string node, string category, string trend)
         {
             Node = node;
             Category = category;
             Trend = trend;
         }
 
-        internal string Node { get; }
+        public string Node { get; }
 
-        internal string Category { get; }
+        public string Category { get; }
 
-        internal string Trend { get; }
+        public string Trend { get; }
 
-        internal DateTimeOffset FirstPendingAt { get; private set; }
+        public DateTimeOffset FirstPendingAt { get; private set; }
 
-        internal DateTimeOffset LastEventAt { get; private set; }
+        public DateTimeOffset LastEventAt { get; private set; }
 
-        internal DateTimeOffset LastEmittedAt { get; set; }
+        public DateTimeOffset LastEmittedAt { get; set; }
 
-        internal int PendingCount { get; private set; }
+        public int PendingCount { get; private set; }
 
-        internal double PendingMaxScore { get; private set; }
+        public double PendingMaxScore { get; private set; }
 
-        internal double PendingCpu { get; private set; }
+        public double PendingCpu { get; private set; }
 
-        internal double PendingPacketLoss { get; private set; }
+        public double PendingPacketLoss { get; private set; }
 
-        internal AlertPriority PendingPriority { get; private set; }
+        public AlertPriority PendingPriority { get; private set; }
 
-        internal AlertPriority LastEmittedPriority { get; set; }
+        public AlertPriority LastEmittedPriority { get; set; }
 
-        internal bool SuppressionOpen { get; set; }
+        public bool SuppressionOpen { get; set; }
 
-        internal void Add(TelemetryFeature feature, double score, AlertPriority priority, DateTimeOffset observedAt)
+        public void Add(TelemetryFeature feature, double score, AlertPriority priority, DateTimeOffset observedAt)
         {
             if (PendingCount == 0)
             {
@@ -680,7 +680,7 @@ public sealed class AlarmTriageEngine
             LastEventAt = observedAt;
         }
 
-        internal void ResetPending()
+        public void ResetPending()
         {
             PendingCount = 0;
             PendingMaxScore = 0;

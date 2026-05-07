@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using System.Runtime.CompilerServices;
 using Microsoft.JSInterop;
 
 namespace CvWeb.Client.Services;
@@ -383,19 +384,30 @@ public sealed class MockStreamService : IMockStreamService
             return;
         }
 
+        var registrationBox = new StrongBox<CancellationTokenRegistration>();
         var registration = cancellationToken.Register(() =>
         {
             lock (_sync)
             {
                 subscribers.Remove(channel);
+                _subscriberCancellationRegistrations.Remove(registrationBox.Value);
             }
 
             channel.Writer.TryComplete();
+            registrationBox.Value.Dispose();
         });
+        registrationBox.Value = registration;
 
         lock (_sync)
         {
             if (_isDisposed)
+            {
+                registration.Dispose();
+                channel.Writer.TryComplete();
+                return;
+            }
+
+            if (cancellationToken.IsCancellationRequested)
             {
                 registration.Dispose();
                 channel.Writer.TryComplete();
