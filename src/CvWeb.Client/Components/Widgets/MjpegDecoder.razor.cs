@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Threading.Channels;
@@ -10,9 +9,9 @@ namespace CvWeb.Client.Components.Widgets;
 
 public sealed partial class MjpegDecoder : IAsyncDisposable
 {
-    private static readonly byte[] BoundaryBytes = Encoding.ASCII.GetBytes("--frame");
+    private static readonly byte[] BoundaryStartBytes = Encoding.ASCII.GetBytes("--frame\r\n");
+    private static readonly byte[] BoundarySepBytes = Encoding.ASCII.GetBytes("\r\n--frame\r\n");
     private static readonly byte[] HeaderTerminatorBytes = Encoding.ASCII.GetBytes("\r\n\r\n");
-    private static readonly byte[] CrLfBytes = Encoding.ASCII.GetBytes("\r\n");
 
     private readonly string CanvasId = $"mjpeg-decoder-{Guid.NewGuid():N}";
     private readonly CancellationTokenSource _streamCts = new();
@@ -71,7 +70,7 @@ public sealed partial class MjpegDecoder : IAsyncDisposable
         }
 
         _dotNetReference = DotNetObjectReference.Create(this);
-        await JS.InvokeVoidAsync("cvDashboard.startMjpegDecoder", CanvasId, string.Empty, _dotNetReference);
+        await JS.InvokeVoidAsync("cvDashboard.initMjpegDecoderCanvas", CanvasId, _dotNetReference);
     }
 
     [JSInvokable]
@@ -167,16 +166,37 @@ public sealed partial class MjpegDecoder : IAsyncDisposable
         Buffer.BlockCopy(_carryBuffer, 0, merged, 0, _carryBuffer.Length);
         Buffer.BlockCopy(chunkBytes, 0, merged, _carryBuffer.Length, chunkBytes.Length);
 
+        // Cap the merged buffer to prevent unbounded memory growth on malformed or stalled streams.
+        // 512KB is generous enough for several fragmented frames yet still bounds worst-case RSS.
+        const int maxCarryBytes = 512 * 1024;
+        if (merged.Length > maxCarryBytes)
+        {
+            _carryBuffer = Array.Empty<byte>();
+            DroppedFrames += 1;
+            StreamState = "degraded";
+            return;
+        }
+
         var scanOffset = 0;
         while (scanOffset < merged.Length)
         {
-            var boundaryStart = FindSequence(merged, BoundaryBytes, scanOffset);
-            if (boundaryStart < 0)
+            int headerStart;
+
+            if (scanOffset == 0 && StartsWithSequence(merged, BoundaryStartBytes, 0))
             {
-                break;
+                headerStart = BoundaryStartBytes.Length;
+            }
+            else
+            {
+                var sepPos = FindSequence(merged, BoundarySepBytes, scanOffset);
+                if (sepPos < 0)
+                {
+                    break;
+                }
+
+                headerStart = sepPos + BoundarySepBytes.Length;
             }
 
-            var headerStart = boundaryStart + BoundaryBytes.Length;
             var headerEnd = FindSequence(merged, HeaderTerminatorBytes, headerStart);
             if (headerEnd < 0)
             {
@@ -192,15 +212,9 @@ public sealed partial class MjpegDecoder : IAsyncDisposable
 
             var payloadStart = headerEnd + HeaderTerminatorBytes.Length;
             var payloadEnd = payloadStart + contentLength;
-            if (payloadEnd + CrLfBytes.Length > merged.Length)
+            if (payloadEnd > merged.Length)
             {
                 break;
-            }
-
-            if (merged[payloadEnd] != CrLfBytes[0] || merged[payloadEnd + 1] != CrLfBytes[1])
-            {
-                scanOffset = payloadEnd;
-                continue;
             }
 
             var frameBytes = new byte[contentLength];
@@ -210,7 +224,7 @@ public sealed partial class MjpegDecoder : IAsyncDisposable
             DecodedFrames += 1;
             BoundaryCount += 1;
 
-            scanOffset = payloadEnd + CrLfBytes.Length;
+            scanOffset = payloadEnd;
         }
 
         if (scanOffset >= merged.Length)
@@ -222,6 +236,24 @@ public sealed partial class MjpegDecoder : IAsyncDisposable
         var remaining = merged.Length - scanOffset;
         _carryBuffer = new byte[remaining];
         Buffer.BlockCopy(merged, scanOffset, _carryBuffer, 0, remaining);
+    }
+
+    private static bool StartsWithSequence(byte[] buffer, byte[] sequence, int startIndex)
+    {
+        if (startIndex + sequence.Length > buffer.Length)
+        {
+            return false;
+        }
+
+        for (var offset = 0; offset < sequence.Length; offset += 1)
+        {
+            if (buffer[startIndex + offset] != sequence[offset])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void EnqueueFrame(byte[] frameBytes)

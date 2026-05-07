@@ -53,39 +53,33 @@ function encodeAscii(text) {
     return new TextEncoder().encode(text);
 }
 
-function buildFakeJpegBytes(frameNumber) {
+async function buildValidJpegBytes(frameNumber) {
     const width = 160;
     const height = 90;
-    const payloadLength = width * height;
-    const payload = new Uint8Array(payloadLength);
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext("2d");
 
-    for (let index = 0; index < payloadLength; index += 1) {
+    const imageData = ctx.createImageData(width, height);
+    for (let index = 0; index < width * height; index += 1) {
         const x = index % width;
         const y = Math.floor(index / width);
         const wave = Math.sin((x + frameNumber * 3.4) / 10) + Math.cos((y + frameNumber * 2.1) / 7);
         const normalized = clamp((wave + 2) / 4, 0, 1);
-        payload[index] = Math.floor(normalized * 255);
+        const value = Math.floor(normalized * 255);
+        const offset = index * 4;
+        imageData.data[offset] = value;
+        imageData.data[offset + 1] = value;
+        imageData.data[offset + 2] = value;
+        imageData.data[offset + 3] = 255;
     }
+    ctx.putImageData(imageData, 0, 0);
 
-    const frameHeader = new Uint8Array([
-        0xff, 0xd8,
-        0xff, 0xe0,
-        0x00, 0x10,
-        0x4a, 0x46, 0x49, 0x46,
-        0x00, 0x01,
-        0x01, 0x00,
-        0x00, 0x01,
-        0x00, 0x01,
-        0x00, 0x00
-    ]);
-
-    const frameTail = new Uint8Array([0xff, 0xd9]);
-
-    return concatenateBytes([frameHeader, payload, frameTail]);
+    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.75 });
+    return new Uint8Array(await blob.arrayBuffer());
 }
 
-function buildMultipartFrame(frameNumber) {
-    const jpeg = buildFakeJpegBytes(frameNumber);
+async function buildMultipartFrame(frameNumber) {
+    const jpeg = await buildValidJpegBytes(frameNumber);
     const boundary = state.mjpegByte.boundary;
     const headerText = `${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n`;
     const trailerText = "\r\n";
@@ -97,8 +91,8 @@ function buildMultipartFrame(frameNumber) {
     ]);
 }
 
-function emitFragmentedMultipartFrame(nowMs) {
-    const frameBytes = buildMultipartFrame(state.mjpegByte.frameNumber);
+async function emitFragmentedMultipartFrame(nowMs) {
+    const frameBytes = await buildMultipartFrame(state.mjpegByte.frameNumber);
     state.mjpegByte.frameNumber += 1;
 
     let offset = 0;
@@ -336,7 +330,9 @@ function startWorker() {
     }, 100);
 
     state.mjpegByteTimer = self.setInterval(() => {
-        emitFragmentedMultipartFrame(Date.now());
+        emitFragmentedMultipartFrame(Date.now()).catch(() => {
+            // Ignore transient frame generation failures.
+        });
     }, 1000 / 30);
 }
 
