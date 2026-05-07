@@ -22,7 +22,7 @@ CvWeb is a two-tier portfolio application built with .NET 10.
 
 ### Live Dashboard (`/dashboard` and `/control-room`)
 
-- Project 01: WASM image drift comparison
+- Project 01: GPGPU 4K byte-level alignment checker
 - Project 02: SignalR telemetry sparkline and health chips
 - Project 03: MJPEG boundary decoder on canvas
 - Project 04: Browser-local alarm triage model

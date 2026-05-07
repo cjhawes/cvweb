@@ -1,0 +1,30 @@
+@* FlipCard Documentation
+   - Front face exposes the live GPU mismatch heatmap and byte-level metrics from two static 4K references.
+   - Back face copy is supplied by the surrounding WidgetCard in Dashboard to keep documentation consistent.
+   - This component owns only view state and JSInterop wiring; shader execution remains in wwwroot/js/site.js.
+*@
+@implements IAsyncDisposable
+
+<div class="widget-status-row">
+    <span class="status-dot @StatusClass"></span>
+    <span>@StatusLabel</span>
+</div>
+
+<canvas id="@CanvasId"
+        class="decoder-canvas"
+        width="960"
+        height="540"
+        aria-label="GPU byte-level mismatch heatmap preview"></canvas>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Backend: @BackendLabel</span>
+    <span class="metric-chip">Textures: @ResolutionLabel</span>
+    <span class="metric-chip">Compared: @ComparedBytes.ToString("N0")</span>
+</div>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Changed Bytes: @ChangedBytes.ToString("N0")</span>
+    <span class="metric-chip">Mismatched Pixels: @MismatchedPixels.ToString("N0")</span>
+    <span class="metric-chip @DriftClass">Drift: @DriftPercent.ToString("0.000")%</span>
+    <span class="metric-chip">Pass Time: @ElapsedMilliseconds.ToString("0.00")ms</span>
+</div>
