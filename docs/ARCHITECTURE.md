@@ -68,3 +68,43 @@ Implement a byte-level 4K reference texture comparison widget using GPU fragment
 - Readback uses a reusable typed array buffer to avoid repeated allocations.
 - Shader compare uses nearest-neighbor sampling to preserve deterministic byte-level channel comparisons.
 - Dashboard card count and grid selectors are unchanged, preserving existing layout behavior.
+
+## Phase 3: Synthetic Telemetry Grid Canvas Widget
+
+### Objective
+Implement a high-frequency telemetry engine widget that simulates 1,024 IoT sensors at 60Hz and renders directly to HTML5 Canvas without disrupting existing dashboard layout or card styling.
+
+### Key Decisions
+- Added `TelemetryGrid` widget as a `.razor` + `.razor.cs` pair to keep presentation and JS interop orchestration separated.
+- Extended `wwwroot/js/mock-stream.worker.js` with a new `telemetry-grid` stream:
+  - 32x32 sensor mesh (1,024 sensors)
+  - 60Hz frame cadence
+  - per-frame intensity, alert mask, and aggregate metrics
+- Extended `wwwroot/js/site.js` with:
+  - `startTelemetryGrid(canvasId, dotNetRef, gridWidth, gridHeight)`
+  - `stopTelemetryGrid(canvasId)`
+  - telemetry-grid routing from worker to renderer sessions
+  - disposal integration in `disposeAllDashboard`
+- Added additive CSS in `app.css` via `.telemetry-grid-canvas` without changing existing grid selectors.
+
+### Circular Buffer Strategy
+- Each telemetry-grid session allocates a fixed ring buffer with 256 slots.
+- Each slot pre-allocates:
+  - `Uint8Array(1024)` for intensity values
+  - `Uint8Array(1024)` for alert flags
+- Write pointer advances via power-of-two masking (`index & 255`) for constant-time wrap-around.
+- When producers outrun rendering, the oldest slot is overwritten and a dropped-frame counter is incremented.
+- Renderer always consumes the newest slot and discards stale backlog to protect frame pacing.
+
+### Runtime Flow
+1. Dashboard starts `MockStreamService`, which starts the worker.
+2. Worker emits `telemetry-grid` frames at 60Hz.
+3. `site.js` routes `telemetry-grid` payloads directly into active telemetry-grid session rings.
+4. `requestAnimationFrame` loop paints the latest frame to Canvas using precomputed color palette and single `putImageData` + `drawImage` pass.
+5. Widget receives 1Hz summary stats via `[JSInvokable] UpdateTelemetryGridStats(...)` for status chips.
+
+### Performance Notes
+- High-frequency telemetry-grid frames bypass per-frame `.NET` deserialization to reduce interop overhead.
+- Circular buffer memory is bounded and pre-allocated to avoid allocation churn under sustained 60Hz load.
+- Rendering uses Canvas pixel buffers instead of DOM node updates, keeping UI thread work predictable.
+- Existing dashboard routing and CSS grid behavior are preserved.

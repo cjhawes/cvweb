@@ -63,6 +63,14 @@
                     SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/WebRtcDiagnosticsWidget.razor">
             <WebRtcDiagnosticsWidget />
         </WidgetCard>
+
+        <WidgetCard Title="Project 06 | Synthetic Telemetry Grid"
+                    Challenge="Operators need to observe high-density sensor fields at 60Hz without overwhelming the UI thread."
+                    Solution="A worker simulates 1,024 IoT sensors and streams frames into a Canvas renderer backed by a circular frame buffer."
+                    Stack="C#, Blazor WASM, JS Interop, Web Worker, Canvas"
+                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/TelemetryGrid.razor">
+            <TelemetryGrid />
+        </WidgetCard>
     </section>
 </main>
 

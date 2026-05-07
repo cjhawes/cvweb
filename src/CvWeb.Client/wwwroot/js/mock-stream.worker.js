@@ -1,9 +1,16 @@
 const state = {
     running: false,
     telemetryTimer: null,
+    telemetryGridTimer: null,
     mjpegTimer: null,
     boundaryCount: 0,
-    node: "edge-gateway-a"
+    node: "edge-gateway-a",
+    telemetryGrid: {
+        width: 32,
+        height: 32,
+        sensorCount: 32 * 32,
+        sequence: 0
+    }
 };
 
 function clamp(value, min, max) {
@@ -37,6 +44,64 @@ function buildTelemetry(nowMs) {
         packetLossPercent: round(packetLoss, 3),
         activeStreams,
         alertLevel
+    };
+}
+
+function buildTelemetryGridFrame(nowMs) {
+    const { width, height, sensorCount } = state.telemetryGrid;
+    const sequence = state.telemetryGrid.sequence;
+
+    const phaseA = nowMs / 1000 / 1.7;
+    const phaseB = nowMs / 1000 / 2.35;
+
+    const intensities = new Uint8Array(sensorCount);
+    const alerts = new Uint8Array(sensorCount);
+
+    let cpuAggregate = 0;
+    let packetLossAggregate = 0;
+    let alertCount = 0;
+
+    for (let index = 0; index < sensorCount; index += 1) {
+        const row = Math.floor(index / width);
+        const col = index - row * width;
+
+        const waveA = Math.sin(col * 0.38 + phaseA);
+        const waveB = Math.cos(row * 0.29 - phaseB);
+        const waveC = Math.sin((row + col) * 0.16 + phaseA * 0.6);
+        const jitter = (Math.random() - 0.5) * 0.24;
+
+        const normalized = clamp((waveA + waveB + waveC + 3 + jitter) / 6, 0, 1);
+        const intensity = Math.floor(normalized * 255);
+
+        let alert = 0;
+        if (intensity > 238) {
+            alert = 2;
+        } else if (intensity > 198) {
+            alert = 1;
+        }
+
+        intensities[index] = intensity;
+        alerts[index] = alert;
+        alertCount += alert > 0 ? 1 : 0;
+
+        cpuAggregate += 35 + normalized * 58 + alert * 4;
+        packetLossAggregate += 0.02 + (1 - normalized) * 0.18 + alert * 0.11;
+    }
+
+    state.telemetryGrid.sequence += 1;
+
+    return {
+        sequence,
+        node: state.node,
+        timestamp: new Date(nowMs).toISOString(),
+        gridWidth: width,
+        gridHeight: height,
+        sensorCount,
+        intensities,
+        alerts,
+        alertCount,
+        cpuAveragePercent: round(cpuAggregate / sensorCount, 2),
+        packetLossAveragePercent: round(packetLossAggregate / sensorCount, 3)
     };
 }
 
@@ -154,12 +219,17 @@ function startWorker() {
 
     state.running = true;
     state.boundaryCount = 0;
+    state.telemetryGrid.sequence = 0;
 
     emitProfiles();
 
     state.telemetryTimer = self.setInterval(() => {
         postMessageEnvelope("telemetry", buildTelemetry(Date.now()));
     }, 300);
+
+    state.telemetryGridTimer = self.setInterval(() => {
+        postMessageEnvelope("telemetry-grid", buildTelemetryGridFrame(Date.now()));
+    }, 1000 / 60);
 
     state.mjpegTimer = self.setInterval(() => {
         state.boundaryCount += 3 + (Math.random() > 0.82 ? 1 : 0);
@@ -182,6 +252,11 @@ function stopWorker() {
     if (state.telemetryTimer !== null) {
         self.clearInterval(state.telemetryTimer);
         state.telemetryTimer = null;
+    }
+
+    if (state.telemetryGridTimer !== null) {
+        self.clearInterval(state.telemetryGridTimer);
+        state.telemetryGridTimer = null;
     }
 
     if (state.mjpegTimer !== null) {

@@ -45,6 +45,31 @@ public sealed class MockStreamServiceTests
         Assert.Equal(sample.PacketLossPercent, streamed.PacketLossPercent);
     }
 
+    [Fact]
+    public async Task HandleWorkerMessage_IgnoresTelemetryGridMessagesWithoutThrowing()
+    {
+        await using var service = new MockStreamService(new NoopJsRuntime());
+
+        var payload = """
+        {
+            "sequence": 42,
+            "gridWidth": 32,
+            "gridHeight": 32,
+            "sensorCount": 1024,
+            "intensities": [10, 20, 30, 40],
+            "alerts": [0, 1, 0, 2],
+            "alertCount": 2,
+            "cpuAveragePercent": 61.2,
+            "packetLossAveragePercent": 0.218
+        }
+        """;
+
+        var exception = await Record.ExceptionAsync(async () =>
+            await service.HandleWorkerMessage("telemetry-grid", payload));
+
+        Assert.Null(exception);
+    }
+
     private sealed class NoopJsRuntime : IJSRuntime
     {
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
