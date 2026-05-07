@@ -442,8 +442,7 @@
             return;
         }
 
-        const sessions = Array.from(dashboardState.telemetryGridSessions.values());
-        for (const session of sessions) {
+        for (const session of dashboardState.telemetryGridSessions.values()) {
             ingestTelemetryGridFrame(session, payload);
         }
     }
@@ -462,10 +461,8 @@
 
         const slot = session.ring[session.writeIndex];
 
-        for (let index = 0; index < session.sensorCount; index += 1) {
-            slot.intensities[index] = sourceIntensities[index] & 255;
-            slot.alerts[index] = sourceAlerts[index] & 255;
-        }
+        slot.intensities.set(sourceIntensities.subarray(0, session.sensorCount));
+        slot.alerts.set(sourceAlerts.subarray(0, session.sensorCount));
 
         slot.sequence = typeof payload.sequence === "number" ? payload.sequence : session.latestSequence + 1;
         slot.alertCount = typeof payload.alertCount === "number" ? payload.alertCount : 0;

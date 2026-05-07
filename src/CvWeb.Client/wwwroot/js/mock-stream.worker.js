@@ -97,8 +97,8 @@ function buildTelemetryGridFrame(nowMs) {
         gridWidth: width,
         gridHeight: height,
         sensorCount,
-        intensities: Array.from(intensities),
-        alerts: Array.from(alerts),
+        intensities,
+        alerts,
         alertCount,
         cpuAveragePercent: round(cpuAggregate / sensorCount, 2),
         packetLossAveragePercent: round(packetLossAggregate / sensorCount, 3)
