@@ -1270,8 +1270,146 @@ void main() {
         }
     }
 
-    async function startWebRtcDiagnostics(videoId, dotNetRef) {
-        stopWebRtcDiagnostics(videoId);
+    function roundTo(value, digits) {
+        const factor = Math.pow(10, digits);
+        return Math.round(value * factor) / factor;
+    }
+
+    function mapWebRtcConnectionState(senderState, receiverState) {
+        const state = receiverState || senderState || "new";
+        if (state === "connected") {
+            return "connected";
+        }
+
+        if (state === "new" || state === "connecting") {
+            return "connecting";
+        }
+
+        return "degraded";
+    }
+
+    function extractWebRtcProbeStats(stats, state) {
+        let inboundVideo = null;
+        let transport = null;
+        const candidatePairs = new Map();
+
+        stats.forEach((report) => {
+            if (!report || typeof report.type !== "string") {
+                return;
+            }
+
+            if (report.type === "inbound-rtp" && report.kind === "video") {
+                inboundVideo = report;
+                return;
+            }
+
+            if (report.type === "candidate-pair") {
+                candidatePairs.set(report.id, report);
+                return;
+            }
+
+            if (report.type === "transport") {
+                transport = report;
+            }
+        });
+
+        let selectedPair = null;
+        if (transport && typeof transport.selectedCandidatePairId === "string") {
+            selectedPair = candidatePairs.get(transport.selectedCandidatePairId) || null;
+        }
+
+        if (!selectedPair) {
+            for (const pair of candidatePairs.values()) {
+                if (pair.selected || pair.nominated) {
+                    selectedPair = pair;
+                    break;
+                }
+            }
+        }
+
+        if (!selectedPair) {
+            for (const pair of candidatePairs.values()) {
+                if (pair.state === "succeeded") {
+                    selectedPair = pair;
+                    break;
+                }
+            }
+        }
+
+        let bitrateKbps = 0;
+        let packetLossPercent = 0;
+        let jitterMs = 0;
+        let framesPerSecond = 0;
+
+        if (inboundVideo) {
+            const bytesReceived = typeof inboundVideo.bytesReceived === "number" ? inboundVideo.bytesReceived : 0;
+            const statsTimestampMs = typeof inboundVideo.timestamp === "number" ? inboundVideo.timestamp : performance.now();
+
+            if (state.lastInboundSnapshot && statsTimestampMs > state.lastInboundSnapshot.timestampMs && bytesReceived >= state.lastInboundSnapshot.bytesReceived) {
+                const deltaBytes = bytesReceived - state.lastInboundSnapshot.bytesReceived;
+                const deltaMs = statsTimestampMs - state.lastInboundSnapshot.timestampMs;
+                bitrateKbps = deltaMs > 0 ? (deltaBytes * 8) / deltaMs : 0;
+            }
+
+            state.lastInboundSnapshot = {
+                bytesReceived,
+                timestampMs: statsTimestampMs
+            };
+
+            if (typeof inboundVideo.jitter === "number") {
+                jitterMs = Math.max(0, inboundVideo.jitter * 1000);
+            }
+
+            if (typeof inboundVideo.framesPerSecond === "number") {
+                framesPerSecond = Math.max(0, inboundVideo.framesPerSecond);
+            }
+
+            const packetsLost = typeof inboundVideo.packetsLost === "number" ? Math.max(0, inboundVideo.packetsLost) : 0;
+            const packetsReceived = typeof inboundVideo.packetsReceived === "number" ? Math.max(0, inboundVideo.packetsReceived) : 0;
+            const totalPackets = packetsLost + packetsReceived;
+            packetLossPercent = totalPackets > 0 ? (packetsLost / totalPackets) * 100 : 0;
+        }
+
+        let roundTripTimeMs = 0;
+        if (selectedPair && typeof selectedPair.currentRoundTripTime === "number") {
+            roundTripTimeMs = Math.max(0, selectedPair.currentRoundTripTime * 1000);
+        }
+
+        if (bitrateKbps <= 0 && selectedPair && typeof selectedPair.availableIncomingBitrate === "number") {
+            bitrateKbps = Math.max(0, selectedPair.availableIncomingBitrate / 1000);
+        }
+
+        state.sampleSequence += 1;
+
+        return {
+            sequence: state.sampleSequence,
+            timestamp: new Date().toISOString(),
+            bitrateKbps: roundTo(bitrateKbps, 2),
+            packetLossPercent: roundTo(packetLossPercent, 3),
+            jitterMs: roundTo(jitterMs, 2),
+            roundTripTimeMs: roundTo(roundTripTimeMs, 2),
+            framesPerSecond: roundTo(framesPerSecond, 1),
+            connectionState: state.connectionState
+        };
+    }
+
+    function buildWebRtcProbeFallbackSample(state) {
+        state.sampleSequence += 1;
+
+        return {
+            sequence: state.sampleSequence,
+            timestamp: new Date().toISOString(),
+            bitrateKbps: 0,
+            packetLossPercent: 0,
+            jitterMs: 0,
+            roundTripTimeMs: 0,
+            framesPerSecond: 0,
+            connectionState: state.connectionState
+        };
+    }
+
+    async function startWebRtcProbe(videoId, dotNetRef) {
+        stopWebRtcProbe(videoId);
 
         const video = document.getElementById(videoId);
         if (!(video instanceof HTMLVideoElement)) {
@@ -1301,7 +1439,9 @@ void main() {
             statsTimer: null,
             drawFrame: null,
             running: true,
-            connectionState: "connecting"
+            connectionState: "connecting",
+            sampleSequence: 0,
+            lastInboundSnapshot: null
         };
 
         dashboardState.webrtcSessions.set(videoId, state);
@@ -1324,14 +1464,7 @@ void main() {
         };
 
         const onConnectionStateChange = () => {
-            const rtcState = receiver.connectionState || sender.connectionState;
-            if (rtcState === "connected") {
-                state.connectionState = "connected";
-            } else if (rtcState === "failed" || rtcState === "disconnected" || rtcState === "closed") {
-                state.connectionState = "degraded";
-            } else {
-                state.connectionState = "connecting";
-            }
+            state.connectionState = mapWebRtcConnectionState(sender.connectionState, receiver.connectionState);
         };
 
         sender.onconnectionstatechange = onConnectionStateChange;
@@ -1341,7 +1474,7 @@ void main() {
             sender.addTrack(track, sourceStream);
         }
 
-        drawWebRtcSource(state);
+        drawWebRtcProbeSource(state);
 
         try {
             const offer = await sender.createOffer();
@@ -1360,47 +1493,38 @@ void main() {
                 return;
             }
 
-            let fps = 0;
-            let jitterMs = 0;
-            let packetLossPercent = 0;
-
+            let sample;
             try {
                 const stats = await receiver.getStats();
-                stats.forEach((report) => {
-                    if (report.type === "inbound-rtp" && report.kind === "video") {
-                        if (typeof report.framesPerSecond === "number") {
-                            fps = report.framesPerSecond;
-                        }
-
-                        if (typeof report.jitter === "number") {
-                            jitterMs = report.jitter * 1000;
-                        }
-
-                        const packetsLost = typeof report.packetsLost === "number" ? report.packetsLost : 0;
-                        const packetsReceived = typeof report.packetsReceived === "number" ? report.packetsReceived : 0;
-                        const totalPackets = packetsLost + packetsReceived;
-                        packetLossPercent = totalPackets > 0 ? (packetsLost / totalPackets) * 100 : 0;
-                    }
-                });
+                sample = extractWebRtcProbeStats(stats, state);
             } catch {
                 state.connectionState = "degraded";
+                sample = buildWebRtcProbeFallbackSample(state);
             }
 
             if (state.dotNetRef) {
-                state.dotNetRef.invokeMethodAsync(
-                    "UpdateWebRtcStats",
-                    Math.round(fps * 10) / 10,
-                    Math.round(jitterMs * 10) / 10,
-                    Math.round(packetLossPercent * 100) / 100,
-                    state.connectionState
-                ).catch(() => {
+                state.dotNetRef.invokeMethodAsync("UpdateWebRtcProbeStats", sample).catch(() => {
                     // Ignore callback failures during component teardown.
                 });
+
+                state.dotNetRef.invokeMethodAsync(
+                    "UpdateWebRtcStats",
+                    sample.framesPerSecond,
+                    sample.jitterMs,
+                    sample.packetLossPercent,
+                    sample.connectionState
+                ).catch(() => {
+                    // Legacy callback for compatibility with older diagnostics widget.
+                });
             }
-        }, 1000);
+        }, 500);
     }
 
-    function drawWebRtcSource(state) {
+    async function startWebRtcDiagnostics(videoId, dotNetRef) {
+        await startWebRtcProbe(videoId, dotNetRef);
+    }
+
+    function drawWebRtcProbeSource(state) {
         if (!state.running) {
             return;
         }
@@ -1431,14 +1555,15 @@ void main() {
 
         ctx.fillStyle = "#f2f8ff";
         ctx.font = "600 22px Consolas, monospace";
-        ctx.fillText("Synthetic Track", 20, 36);
+        ctx.fillText("WebRTC Probe", 20, 36);
         ctx.font = "500 14px Consolas, monospace";
-        ctx.fillText(new Date().toISOString(), 20, 58);
+        ctx.fillText(`State: ${state.connectionState}`, 20, 58);
+        ctx.fillText(new Date().toISOString(), 20, 78);
 
-        state.drawFrame = requestAnimationFrame(() => drawWebRtcSource(state));
+        state.drawFrame = requestAnimationFrame(() => drawWebRtcProbeSource(state));
     }
 
-    function stopWebRtcDiagnostics(videoId) {
+    function stopWebRtcProbe(videoId) {
         const state = dashboardState.webrtcSessions.get(videoId);
         if (!state) {
             return;
@@ -1475,6 +1600,10 @@ void main() {
         dashboardState.webrtcSessions.delete(videoId);
     }
 
+    function stopWebRtcDiagnostics(videoId) {
+        stopWebRtcProbe(videoId);
+    }
+
     function disposeAllDashboard() {
         stopMockStreamWorker();
 
@@ -1495,7 +1624,7 @@ void main() {
 
         const webrtcIds = Array.from(dashboardState.webrtcSessions.keys());
         for (const sessionId of webrtcIds) {
-            stopWebRtcDiagnostics(sessionId);
+            stopWebRtcProbe(sessionId);
         }
     }
 
@@ -1516,6 +1645,8 @@ void main() {
         stopMjpegDecoder,
         startTelemetryGrid,
         stopTelemetryGrid,
+        startWebRtcProbe,
+        stopWebRtcProbe,
         startWebRtcDiagnostics,
         stopWebRtcDiagnostics,
         disposeAll: disposeAllDashboard

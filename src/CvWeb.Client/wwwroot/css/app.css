@@ -648,6 +648,47 @@ a {
     stroke-linejoin: round;
 }
 
+.webrtc-chart-grid {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.webrtc-chart-panel {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.webrtc-chart-header {
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #b8cbee;
+    font-family: "Consolas", "Cascadia Mono", monospace;
+}
+
+.webrtc-chart {
+    height: 92px;
+}
+
+.webrtc-line {
+    fill: none;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.webrtc-line-bitrate {
+    stroke: #2df6ff;
+}
+
+.webrtc-line-loss {
+    stroke: #ff9f43;
+}
+
+.webrtc-line-jitter {
+    stroke: #ffd06f;
+}
+
 .decoder-canvas,
 .diagnostic-video {
     width: 100%;

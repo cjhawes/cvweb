@@ -1,6 +1,7 @@
 @* FlipCard Documentation
     - Front face hosts live widget output only.
     - Back face captures challenge, solution, and stack summary for quick review.
+    - High-frequency diagnostics should keep stream processing outside this component and pass only presentation-ready state.
     - Keep this component presentation-only; stream and processing logic belongs in services/widgets.
 *@
 <article class="widget-card @FlipClass">

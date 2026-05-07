@@ -56,12 +56,12 @@
             <AlarmTriage />
         </WidgetCard>
 
-        <WidgetCard Title="Project 05 | WebRTC Diagnostics"
+        <WidgetCard Title="Project 05 | WebRTC Diagnostic Probe"
                     Challenge="Connection quality changes faster than static health checks can capture."
-                    Solution="A peer connection loop runs continuous diagnostics and calculates live frame health from RTC stats."
+                Solution="A simulated peer connection samples RTCStatsReport in real time and graphs bitrate, loss, and jitter as a live health probe."
                     Stack="C#, Blazor WASM, JS Interop, WebRTC"
-                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/WebRtcDiagnosticsWidget.razor">
-            <WebRtcDiagnosticsWidget />
+                SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/WebRtcProbe.razor">
+            <WebRtcProbe />
         </WidgetCard>
 
         <WidgetCard Title="Project 06 | Synthetic Telemetry Grid"

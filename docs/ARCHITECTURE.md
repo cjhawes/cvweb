@@ -197,3 +197,40 @@ Implement a browser-local alarm triage pipeline that intercepts noisy telemetry 
 - Added xUnit tests for `AlarmTriageEngine` grouping, suppression, and malformed JSON handling.
 - Added bUnit tests for `AlarmTriage` warm-up and debounced priority alert rendering.
 - Extended `MockStreamServiceTests` to verify raw telemetry JSON fanout.
+
+## Phase 6: WebRTC Diagnostic Probe Widget
+
+### Objective
+Implement a WebRTC probe widget that runs a simulated peer connection, samples `RTCStatsReport` via JS interop, and renders real-time network health trends for bitrate, packet loss, and jitter.
+
+### Key Decisions
+- Added `WebRtcProbe` widget as a `.razor` + `.razor.cs` pair to keep UI markup separate from WebRTC interop and metrics logic.
+- Added `WebRtcProbeStatsSample` DTO in `StreamModels.cs` as the JS-to-.NET mapping contract.
+- Added `WebRtcProbeMetricsEngine` for bounded metric windowing, polyline generation, and health score calculation.
+- Extended `wwwroot/js/site.js` with:
+  - `startWebRtcProbe(videoId, dotNetRef)`
+  - `stopWebRtcProbe(videoId)`
+  - `extractWebRtcProbeStats(stats, state)` for `RTCStatsReport` mapping
+- Kept compatibility wrappers for legacy `startWebRtcDiagnostics/stopWebRtcDiagnostics` JS APIs.
+
+### RTCStats Mapping Strategy
+- JS samples `receiver.getStats()` every 500ms and extracts:
+  - `inbound-rtp` (video): `bytesReceived`, `packetsReceived`, `packetsLost`, `jitter`, `framesPerSecond`
+  - selected `candidate-pair`: `currentRoundTripTime`, `availableIncomingBitrate`
+- Derived metrics before interop:
+  - bitrate: byte-delta over stats timestamp delta
+  - packet loss percent: `packetsLost / (packetsLost + packetsReceived)`
+  - jitter ms: `jitter * 1000`
+- A compact sample object is sent to `[JSInvokable] UpdateWebRtcProbeStats(WebRtcProbeStatsSample sample)`.
+
+### Runtime Flow
+1. `WebRtcProbe` mounts and calls `cvDashboard.startWebRtcProbe(...)`.
+2. JS creates sender/receiver `RTCPeerConnection` instances and loops back a synthetic canvas stream.
+3. JS samples `RTCStatsReport` and maps raw reports to a typed probe payload.
+4. C# receives samples, updates bounded metric windows, computes health score, and re-renders chart polylines.
+5. Disposal calls `cvDashboard.stopWebRtcProbe(...)` and tears down media tracks, timers, and peer connections.
+
+### Performance Notes
+- Stats mapping runs in JS to minimize .NET interop payload size and callback frequency.
+- Probe history uses fixed-size windows in `WebRtcProbeMetricsEngine` to prevent unbounded allocations.
+- Chart geometry is generated from bounded windows, avoiding DOM-heavy rendering patterns.
