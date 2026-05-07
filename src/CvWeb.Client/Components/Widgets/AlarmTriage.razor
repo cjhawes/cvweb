@@ -1,0 +1,41 @@
+@* FlipCard Documentation
+   - Front face renders a local priority-alert feed generated from noisy worker JSON telemetry.
+   - Back face documentation remains owned by the surrounding WidgetCard metadata in Dashboard.
+   - UI stays in .razor while scoring/grouping/debounce logic lives in AlarmTriage.razor.cs + AlarmTriageEngine.
+*@
+
+<div class="widget-status-row">
+    <span class="status-dot @StatusClass"></span>
+    <span>@ModelLabel</span>
+</div>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Latest Score: @LatestScore.ToString("0.0")</span>
+    <span class="metric-chip">Buffered Clusters: @BufferedClusters</span>
+    <span class="metric-chip">Priority Alerts: @PublishedAlerts.ToString("N0")</span>
+    <span class="metric-chip">Suppressed: @SuppressedEvents.ToString("N0")</span>
+</div>
+
+<div class="metric-chip-row">
+    <span class="metric-chip">Debounce: @DebounceLabel</span>
+    <span class="metric-chip">Rate Limit: @RateLimitLabel</span>
+</div>
+
+<ul class="alert-feed priority-alert-feed">
+    @if (Alerts.Count == 0)
+    {
+        <li class="alert-row">No priority alerts yet.</li>
+    }
+    else
+    {
+        @foreach (var alert in Alerts)
+        {
+            <li class="alert-row @alert.PriorityClass">
+                <span>@alert.LastSeen.ToLocalTime().ToString("HH:mm:ss")</span>
+                <strong>@alert.Priority</strong>
+                <span>@alert.Summary</span>
+                <span class="alert-group-pill">x@alert.GroupedCount</span>
+            </li>
+        }
+    }
+</ul>

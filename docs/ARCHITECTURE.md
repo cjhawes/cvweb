@@ -24,7 +24,7 @@ Replace dashboard runtime dependencies on external API/SignalR endpoints with an
 
 ### Widget Integration
 - `SignalRTelemetryWidget` now consumes telemetry channel data.
-- `AiAlarmTriageWidget` now consumes telemetry channel data for score/priority generation.
+- `AlarmTriage` consumes raw telemetry JSON channel data for local categorization and priority alert grouping.
 - `MjpegCanvasWidget` now consumes MJPEG channel data and updates decoder boundary state through JS interop.
 - `WebRtcDiagnosticsWidget` now uses `IMockStreamService` for track profile metadata.
 
@@ -152,3 +152,48 @@ Implement a browser-local MJPEG decoder that ingests raw multipart HTTP byte chu
 - Byte chunk fanout uses bounded channels with `DropOldest` backpressure semantics.
 - Decoder parsing is span-oriented with carry buffer reuse to avoid unbounded stream growth.
 - Rendering is canvas-based and avoids DOM node churn or native `<video>` playback overhead.
+
+## Phase 5: AI Alarm Triage Widget
+
+### Objective
+Implement a browser-local alarm triage pipeline that intercepts noisy telemetry JSON messages from the Web Worker, groups spam-like anomalies, and publishes a clean, rate-limited `Priority Alerts` feed.
+
+### Key Decisions
+- Added raw telemetry JSON stream fanout to `IMockStreamService`/`MockStreamService` via `TelemetryJsonSample`:
+  - `SubscribeTelemetryJson(...)`
+  - `telemetry` worker payloads are now forwarded as raw JSON and typed DTOs in parallel.
+- Added `AlarmTriageEngine` service for deterministic local categorization:
+  - weighted risk scoring
+  - rolling baseline anomaly boost
+  - deterministic category/trend clustering
+  - per-cluster burst grouping
+  - token-bucket rate limiting
+- Added `AlarmTriage` widget (`.razor` + `.razor.cs`) and replaced dashboard Project 04 component usage.
+
+### Aggregation & Debounce Strategy
+- Incoming telemetry events are parsed from raw JSON payloads to feature vectors (`cpu`, `memory`, `packetLoss`, `activeStreams`, `alertLevel`).
+- Risk score is computed with weighted normalization and a rolling z-score boost.
+- Events are grouped into deterministic clusters using:
+  - node
+  - category (`packet-loss-burst`, `cpu-saturation`, `memory-pressure`, `stream-contention`, `composite-anomaly`)
+  - trend (`rising`, `recovering`, `steady`)
+- Debounce behavior:
+  - trailing window (`1.2s`) merges bursty spam into grouped incidents.
+  - sustained burst cooldown (`2.0s`) emits periodic summaries for long-running noise.
+- Rate limiting:
+  - global token bucket (`2 alerts/sec`, burst `4`) caps feed output.
+  - overflowed incidents are counted as suppressed until tokens refill.
+
+### Runtime Flow
+1. Worker posts `telemetry` envelope.
+2. JS bridge forwards payload JSON to `MockStreamService.HandleWorkerMessage`.
+3. Service writes:
+   - typed telemetry (`TelemetrySignal`) for existing widgets
+   - raw telemetry JSON (`TelemetryJsonSample`) for `AlarmTriage`
+4. `AlarmTriage` consumes raw JSON, calls `AlarmTriageEngine`, and updates metric chips/feed.
+5. UI displays grouped, prioritized, and rate-limited alert rows.
+
+### Test Coverage
+- Added xUnit tests for `AlarmTriageEngine` grouping, suppression, and malformed JSON handling.
+- Added bUnit tests for `AlarmTriage` warm-up and debounced priority alert rendering.
+- Extended `MockStreamServiceTests` to verify raw telemetry JSON fanout.

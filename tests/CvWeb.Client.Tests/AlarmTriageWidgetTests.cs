@@ -1,51 +1,68 @@
-using Bunit;
 using System.Threading.Channels;
+using Bunit;
 using CvWeb.Client.Components.Widgets;
 using CvWeb.Client.Services;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.JSInterop;
 
 namespace CvWeb.Client.Tests;
 
-public sealed class MjpegDecoderWidgetTests
+public sealed class AlarmTriageWidgetTests
 {
     [Fact]
-    public void RendersDecoderStatusAndMetricsShell()
+    public void RendersWarmupStateBeforeAnyTelemetryArrives()
     {
         using var context = new BunitContext();
-        context.JSInterop.Mode = JSRuntimeMode.Loose;
-        context.Services.AddSingleton<IMockStreamService>(new FakeMockStreamService());
+        var stream = new FakeMockStreamService();
+        context.Services.AddSingleton<IMockStreamService>(stream);
 
-        var component = context.Render<MjpegDecoder>();
+        var component = context.Render<AlarmTriage>();
 
-        Assert.Contains("Transport: multipart byte stream", component.Markup);
-        Assert.Contains("Chunks: 0", component.Markup);
+        Assert.Contains("Local triage engine warming up", component.Markup);
+        Assert.Contains("No priority alerts yet.", component.Markup);
     }
 
     [Fact]
-    public async Task UpdatesRenderMetricsViaInteropCallback()
+    public async Task EmitsPriorityAlertAfterDebouncedClusterProcessing()
     {
         using var context = new BunitContext();
-        context.JSInterop.Mode = JSRuntimeMode.Loose;
-        context.Services.AddSingleton<IMockStreamService>(new FakeMockStreamService());
+        var stream = new FakeMockStreamService();
+        context.Services.AddSingleton<IMockStreamService>(stream);
 
-        var component = context.Render<MjpegDecoder>();
+        var component = context.Render<AlarmTriage>();
 
-        await component.Instance.UpdateMjpegStats(boundaryCount: 12, renderFps: 30);
+        var t0 = DateTimeOffset.Parse("2026-05-07T12:00:00Z");
+        await stream.PublishTelemetryJsonAsync(new TelemetryJsonSample(t0, CreatePayload("edge-a", 91.4, 77.2, 1.94, 45, 2)));
+        await stream.PublishTelemetryJsonAsync(new TelemetryJsonSample(t0.AddMilliseconds(2200), CreatePayload("edge-a", 90.6, 76.8, 1.88, 44, 2)));
 
         component.WaitForAssertion(() =>
         {
-            Assert.Contains("Boundaries: 12", component.Markup);
-            Assert.Contains("Render FPS: 30.0", component.Markup);
+            Assert.Contains("Local triage engine active", component.Markup);
+            Assert.Contains("Priority Alerts: 1", component.Markup);
+            Assert.Contains("edge-a", component.Markup);
         });
+    }
+
+    private static string CreatePayload(string node, double cpu, double memory, double packetLoss, int activeStreams, int alertLevel)
+    {
+        return $$"""
+        {
+          "node": "{{node}}",
+          "timestamp": "2026-05-07T12:00:00Z",
+          "cpuLoadPercent": {{cpu}},
+          "memoryLoadPercent": {{memory}},
+          "packetLossPercent": {{packetLoss}},
+          "activeStreams": {{activeStreams}},
+          "alertLevel": {{alertLevel}}
+        }
+        """;
     }
 
     private sealed class FakeMockStreamService : IMockStreamService
     {
-        private readonly Channel<MjpegByteChunk> _mjpegBytes = Channel.CreateUnbounded<MjpegByteChunk>();
         private readonly Channel<TelemetrySignal> _telemetry = Channel.CreateUnbounded<TelemetrySignal>();
         private readonly Channel<TelemetryJsonSample> _telemetryJson = Channel.CreateUnbounded<TelemetryJsonSample>();
         private readonly Channel<MjpegStreamSample> _mjpeg = Channel.CreateUnbounded<MjpegStreamSample>();
+        private readonly Channel<MjpegByteChunk> _mjpegByte = Channel.CreateUnbounded<MjpegByteChunk>();
 
         public ValueTask StartAsync(CancellationToken cancellationToken = default)
         {
@@ -74,7 +91,7 @@ public sealed class MjpegDecoderWidgetTests
 
         public ChannelReader<MjpegByteChunk> SubscribeMjpegByteChunks(CancellationToken cancellationToken = default)
         {
-            return _mjpegBytes.Reader;
+            return _mjpegByte.Reader;
         }
 
         public ValueTask<WebRtcTrackEnvelope> GetWebRtcTrackProfileAsync(string profile, CancellationToken cancellationToken = default)
@@ -88,11 +105,16 @@ public sealed class MjpegDecoderWidgetTests
 
         public ValueTask DisposeAsync()
         {
-            _mjpegBytes.Writer.TryComplete();
             _telemetry.Writer.TryComplete();
             _telemetryJson.Writer.TryComplete();
             _mjpeg.Writer.TryComplete();
+            _mjpegByte.Writer.TryComplete();
             return ValueTask.CompletedTask;
+        }
+
+        public ValueTask PublishTelemetryJsonAsync(TelemetryJsonSample sample)
+        {
+            return _telemetryJson.Writer.WriteAsync(sample);
         }
     }
 }

@@ -46,6 +46,21 @@ public sealed class MockStreamServiceTests
     }
 
     [Fact]
+    public async Task HandleWorkerMessage_PublishesRawTelemetryJsonToSubscribers()
+    {
+        await using var service = new MockStreamService(new NoopJsRuntime());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        var reader = service.SubscribeTelemetryJson(timeout.Token);
+
+        const string payload = "{\"node\":\"edge-gateway-a\",\"cpuLoadPercent\":92.3,\"packetLossPercent\":1.91}";
+        await service.HandleWorkerMessage("telemetry", payload);
+
+        var streamed = await reader.ReadAsync(timeout.Token);
+        Assert.Equal(payload, streamed.PayloadJson);
+    }
+
+    [Fact]
     public async Task HandleWorkerMessage_IgnoresTelemetryGridMessagesWithoutThrowing()
     {
         await using var service = new MockStreamService(new NoopJsRuntime());
