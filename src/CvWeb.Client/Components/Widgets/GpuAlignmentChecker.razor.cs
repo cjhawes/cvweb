@@ -4,6 +4,9 @@ using Microsoft.JSInterop;
 
 namespace CvWeb.Client.Components.Widgets;
 
+/// <summary>
+/// Renders GPU-based 4K alignment metrics and mismatch heatmap status.
+/// </summary>
 public sealed partial class GpuAlignmentChecker
 {
     private readonly string CanvasId = $"gpu-alignment-{Guid.NewGuid():N}";
@@ -57,6 +60,17 @@ public sealed partial class GpuAlignmentChecker
         }
     }
 
+    /// <summary>
+    /// Applies GPU comparison metrics pushed from JavaScript interop.
+    /// </summary>
+    /// <param name="changedBytes">The number of changed bytes.</param>
+    /// <param name="comparedBytes">The total compared bytes.</param>
+    /// <param name="mismatchedPixels">The number of mismatched pixels.</param>
+    /// <param name="elapsedMilliseconds">The elapsed compare time in milliseconds.</param>
+    /// <param name="backend">The active backend name.</param>
+    /// <param name="textureWidth">The compared texture width.</param>
+    /// <param name="textureHeight">The compared texture height.</param>
+    /// <returns>A task that completes after state has been updated.</returns>
     [JSInvokable]
     public Task UpdateGpuAlignmentResult(
         int changedBytes,
@@ -81,6 +95,11 @@ public sealed partial class GpuAlignmentChecker
         return InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>
+    /// Applies an interop failure state for GPU alignment initialization or execution.
+    /// </summary>
+    /// <param name="reason">The failure reason supplied by JavaScript interop.</param>
+    /// <returns>A task that completes after state has been updated.</returns>
     [JSInvokable]
     public Task UpdateGpuAlignmentFailure(string reason)
     {
@@ -90,6 +109,9 @@ public sealed partial class GpuAlignmentChecker
         return InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>
+    /// Stops GPU interop resources and releases object references.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         try

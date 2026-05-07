@@ -50,8 +50,7 @@ a {
     min-height: 100vh;
 }
 
-.cv-shell,
-.control-room {
+.cv-shell {
     position: relative;
     width: min(100%, var(--max-width));
     margin: 0 auto;
@@ -576,34 +575,6 @@ a {
     background: #ff6f6f;
 }
 
-.widget-metrics-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.6rem;
-}
-
-.diff-image-card {
-    margin: 0;
-    border: 1px solid rgba(255, 127, 50, 0.24);
-    border-radius: 10px;
-    padding: 0.55rem;
-    background: rgba(9, 17, 37, 0.84);
-}
-
-.diff-image-card figcaption {
-    margin-bottom: 0.4rem;
-    font-size: 0.8rem;
-    color: #c3d0f4;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
-
-.diff-image-card img {
-    width: 100%;
-    display: block;
-    border-radius: 6px;
-}
-
 .metric-chip-row {
     display: flex;
     flex-wrap: wrap;
@@ -755,53 +726,6 @@ a {
     color: #bfeeff;
 }
 
-.control-room {
-    min-height: 100vh;
-    display: grid;
-    place-items: center;
-}
-
-.control-panel {
-    width: min(760px, 100%);
-    padding: clamp(1.2rem, 3vw, 2rem);
-    border-radius: 16px;
-    border: 1px solid rgba(45, 246, 255, 0.24);
-    background: linear-gradient(145deg, rgba(12, 24, 53, 0.86), rgba(9, 16, 35, 0.72));
-    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.4);
-}
-
-.control-panel h1 {
-    margin: 0.2rem 0 0.5rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-family: "Arial Black", "Impact", sans-serif;
-}
-
-.control-panel p {
-    margin: 0;
-    line-height: 1.65;
-    color: #d6defe;
-}
-
-.control-endpoints {
-    margin: 1.2rem 0 1.7rem;
-    padding: 0;
-    list-style: none;
-    display: grid;
-    gap: 0.6rem;
-}
-
-.control-endpoints li {
-    border-radius: 10px;
-    padding: 0.66rem 0.8rem;
-    border: 1px solid rgba(255, 127, 50, 0.34);
-    background: rgba(7, 12, 28, 0.7);
-    font-family: "Consolas", "Cascadia Mono", "Lucida Console", monospace;
-    font-size: 0.9rem;
-    color: #c7d4ff;
-    overflow-x: auto;
-}
-
 [data-animate] {
     opacity: 0;
     transform: translateY(22px);
@@ -861,8 +785,7 @@ a {
 }
 
 @media (max-width: 640px) {
-    .cv-shell,
-    .control-room {
+    .cv-shell {
         padding-top: 4.4rem;
         padding-bottom: 3.2rem;
     }
@@ -905,9 +828,6 @@ a {
         max-height: 260px;
     }
 
-    .widget-metrics-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 #blazor-error-ui {

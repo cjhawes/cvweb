@@ -4,6 +4,9 @@ using Microsoft.JSInterop;
 
 namespace CvWeb.Client.Components.Widgets;
 
+/// <summary>
+/// Renders simulated WebRTC diagnostics with rolling network-health metrics.
+/// </summary>
 public sealed partial class WebRtcProbe : IAsyncDisposable
 {
     private const double ChartWidth = 320d;
@@ -105,6 +108,11 @@ public sealed partial class WebRtcProbe : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Applies a WebRTC probe sample pushed from JavaScript interop.
+    /// </summary>
+    /// <param name="sample">The sampled WebRTC metrics payload.</param>
+    /// <returns>A task that completes after state has been updated.</returns>
     [JSInvokable]
     public Task UpdateWebRtcProbeStats(WebRtcProbeStatsSample sample)
     {
@@ -128,6 +136,9 @@ public sealed partial class WebRtcProbe : IAsyncDisposable
         });
     }
 
+    /// <summary>
+    /// Stops probe sessions and releases JS interop references.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         try

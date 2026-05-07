@@ -4,6 +4,9 @@ using Microsoft.AspNetCore.Components;
 
 namespace CvWeb.Client.Components.Widgets;
 
+/// <summary>
+/// Renders local alarm triage state and grouped priority alerts.
+/// </summary>
 public partial class AlarmTriage : IAsyncDisposable
 {
     private readonly List<PriorityAlert> _alerts = [];
@@ -51,6 +54,9 @@ public partial class AlarmTriage : IAsyncDisposable
         _streamTask = ConsumeTelemetryJsonAsync(jsonReader, _streamCts.Token);
     }
 
+    /// <summary>
+    /// Stops the telemetry subscription and releases local cancellation resources.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _streamCts.Cancel();

@@ -7,6 +7,9 @@ using Microsoft.JSInterop;
 
 namespace CvWeb.Client.Components.Widgets;
 
+/// <summary>
+/// Software-decodes MJPEG multipart byte chunks and renders frames to canvas.
+/// </summary>
 public sealed partial class MjpegDecoder : IAsyncDisposable
 {
     private static readonly byte[] BoundaryStartBytes = Encoding.ASCII.GetBytes("--frame\r\n");
@@ -73,6 +76,12 @@ public sealed partial class MjpegDecoder : IAsyncDisposable
         await JS.InvokeVoidAsync("cvDashboard.initMjpegDecoderCanvas", CanvasId, _dotNetReference);
     }
 
+    /// <summary>
+    /// Applies MJPEG boundary and render-rate statistics from JavaScript.
+    /// </summary>
+    /// <param name="boundaryCount">The latest boundary count.</param>
+    /// <param name="renderFps">The latest render frames-per-second value.</param>
+    /// <returns>A task that completes after state has been updated.</returns>
     [JSInvokable]
     public Task UpdateMjpegStats(int boundaryCount, int renderFps)
     {
@@ -81,6 +90,9 @@ public sealed partial class MjpegDecoder : IAsyncDisposable
         return InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>
+    /// Stops decode loops and releases JS interop and queue resources.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _streamCts.Cancel();

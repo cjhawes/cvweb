@@ -24,58 +24,76 @@
     </header>
 
     <section class="widget-grid section">
-        <WidgetCard Title="Project 01 | GPGPU Alignment Checker"
-                Challenge="Physical camera drift can be invisible to the human eye but still degrade downstream analytics."
-                Solution="A fragment shader compares two static 4K reference textures channel-by-channel and returns byte-level drift metrics in milliseconds."
-                Stack="C#, Blazor WASM, JS Interop, WebGL2"
-                SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/GpuAlignmentChecker.razor">
-            <GpuAlignmentChecker />
-        </WidgetCard>
-
-        <WidgetCard Title="Project 02 | SignalR IoT Telemetry"
-                    Challenge="Polling introduces latency and misses micro-spikes during operational incidents."
-                    Solution="A SignalR stream pushes aggressive telemetry updates into a live sparkline and metric panel."
-                    Stack="C#, Blazor WASM, SignalR"
-                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/SignalRTelemetryWidget.razor">
-            <SignalRTelemetryWidget />
-        </WidgetCard>
-
-        <WidgetCard Title="Project 03 | MJPEG Canvas Decoder"
-                    Challenge="Standard video elements hide frame-boundary behavior and payload rhythm under network load."
-                    Solution="A raw multipart byte stream is read directly and decoded into frame boundaries rendered at 30fps on canvas."
-                    Stack="C#, Blazor WASM, JS Interop, Canvas"
-                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/MjpegDecoder.razor">
-            <MjpegDecoder />
-        </WidgetCard>
-
-        <WidgetCard Title="Project 04 | AI Alarm Triage"
-                    Challenge="Noisy telemetry floods operators with low-value alerts and slows response time."
-                    Solution="A browser-local scoring model classifies incoming telemetry into priority alerts and surfaces only what matters."
-                    Stack="C#, Blazor WASM"
-                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/AlarmTriage.razor">
-            <AlarmTriage />
-        </WidgetCard>
-
-        <WidgetCard Title="Project 05 | WebRTC Diagnostic Probe"
-                    Challenge="Connection quality changes faster than static health checks can capture."
-                Solution="A simulated peer connection samples RTCStatsReport in real time and graphs bitrate, loss, and jitter as a live health probe."
-                    Stack="C#, Blazor WASM, JS Interop, WebRTC"
-                SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/WebRtcProbe.razor">
-            <WebRtcProbe />
-        </WidgetCard>
-
-        <WidgetCard Title="Project 06 | Synthetic Telemetry Grid"
-                    Challenge="Operators need to observe high-density sensor fields at 60Hz without overwhelming the UI thread."
-                    Solution="A worker simulates 1,024 IoT sensors and streams frames into a Canvas renderer backed by a circular frame buffer."
-                    Stack="C#, Blazor WASM, JS Interop, Web Worker, Canvas"
-                    SourceUrl="https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/TelemetryGrid.razor">
-            <TelemetryGrid />
-        </WidgetCard>
+        @foreach (var widget in WidgetCards)
+        {
+            <WidgetCard @key="widget.Title"
+                        Title="@widget.Title"
+                        Challenge="@widget.Challenge"
+                        Solution="@widget.Solution"
+                        Stack="@widget.Stack"
+                        SourceUrl="@widget.SourceUrl">
+                <DynamicComponent Type="@widget.ComponentType" />
+            </WidgetCard>
+        }
     </section>
 </main>
 
 @code {
+    private static readonly IReadOnlyList<WidgetCardDefinition> WidgetCards =
+    [
+        new(
+            "Project 01 | GPGPU Alignment Checker",
+            "Physical camera drift can be invisible to the human eye but still degrade downstream analytics.",
+            "A fragment shader compares two static 4K reference textures channel-by-channel and returns byte-level drift metrics in milliseconds.",
+            "C#, Blazor WASM, JS Interop, WebGL2",
+            "https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/GpuAlignmentChecker.razor",
+            typeof(GpuAlignmentChecker)),
+        new(
+            "Project 02 | Worker IoT Telemetry Stream",
+            "Polling introduces latency and misses micro-spikes during operational incidents.",
+            "A browser-local worker telemetry stream pushes aggressive updates into a live sparkline and metric panel.",
+            "C#, Blazor WASM, Web Worker",
+            "https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/SignalRTelemetryWidget.razor",
+            typeof(SignalRTelemetryWidget)),
+        new(
+            "Project 03 | MJPEG Canvas Decoder",
+            "Standard video elements hide frame-boundary behavior and payload rhythm under network load.",
+            "A raw multipart byte stream is read directly and decoded into frame boundaries rendered at 30fps on canvas.",
+            "C#, Blazor WASM, JS Interop, Canvas",
+            "https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/MjpegDecoder.razor",
+            typeof(MjpegDecoder)),
+        new(
+            "Project 04 | AI Alarm Triage",
+            "Noisy telemetry floods operators with low-value alerts and slows response time.",
+            "A browser-local scoring model classifies incoming telemetry into priority alerts and surfaces only what matters.",
+            "C#, Blazor WASM",
+            "https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/AlarmTriage.razor",
+            typeof(AlarmTriage)),
+        new(
+            "Project 05 | WebRTC Diagnostic Probe",
+            "Connection quality changes faster than static health checks can capture.",
+            "A simulated peer connection samples RTCStatsReport in real time and graphs bitrate, loss, and jitter as a live health probe.",
+            "C#, Blazor WASM, JS Interop, WebRTC",
+            "https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/WebRtcProbe.razor",
+            typeof(WebRtcProbe)),
+        new(
+            "Project 06 | Synthetic Telemetry Grid",
+            "Operators need to observe high-density sensor fields at 60Hz without overwhelming the UI thread.",
+            "A worker simulates 1,024 IoT sensors and streams frames into a Canvas renderer backed by a circular frame buffer.",
+            "C#, Blazor WASM, JS Interop, Web Worker, Canvas",
+            "https://github.com/cjhawes/cvweb/blob/main/src/CvWeb.Client/Components/Widgets/TelemetryGrid.razor",
+            typeof(TelemetryGrid))
+    ];
+
     private readonly string _landingOwnerToken = $"dashboard-{Guid.NewGuid():N}";
+
+    private sealed record WidgetCardDefinition(
+        string Title,
+        string Challenge,
+        string Solution,
+        string Stack,
+        string SourceUrl,
+        Type ComponentType);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -86,6 +104,9 @@
         }
     }
 
+    /// <summary>
+    /// Stops the worker-backed dashboard sessions and releases JS resources when the page is disposed.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         try

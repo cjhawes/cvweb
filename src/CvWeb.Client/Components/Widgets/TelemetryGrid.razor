@@ -4,10 +4,7 @@
    - This component keeps UI markup in .razor while stream/canvas orchestration lives in TelemetryGrid.razor.cs.
 *@
 
-<div class="widget-status-row">
-    <span class="status-dot @StatusClass"></span>
-    <span>@StatusLabel</span>
-</div>
+<WidgetStatus StatusClass="@StatusClass" Label="@StatusLabel" />
 
 <canvas id="@CanvasId"
         class="telemetry-grid-canvas decoder-canvas"
@@ -15,16 +12,16 @@
         height="320"
         aria-label="Synthetic telemetry grid showing 1024 IoT sensors"></canvas>
 
-<div class="metric-chip-row">
-    <span class="metric-chip">Sensors: @SensorCount.ToString("N0")</span>
-    <span class="metric-chip">Ingest: @IngestRateHz.ToString("0.0")Hz</span>
-    <span class="metric-chip">Render: @RenderRateFps.ToString("0.0")fps</span>
-    <span class="metric-chip">Dropped: @DroppedFrames.ToString("N0")</span>
-</div>
+<MetricChipRow>
+    <MetricChip Text="@($"Sensors: {SensorCount:N0}")" />
+    <MetricChip Text="@($"Ingest: {IngestRateHz:0.0}Hz")" />
+    <MetricChip Text="@($"Render: {RenderRateFps:0.0}fps")" />
+    <MetricChip Text="@($"Dropped: {DroppedFrames:N0}")" />
+</MetricChipRow>
 
-<div class="metric-chip-row">
-    <span class="metric-chip">Alerts: @AlertSensors.ToString("N0")</span>
-    <span class="metric-chip">CPU Mean: @CpuAveragePercent.ToString("0.0")%</span>
-    <span class="metric-chip">Packet Loss Mean: @PacketLossAveragePercent.ToString("0.000")%</span>
-    <span class="metric-chip">Sequence: @LastSequence.ToString("N0")</span>
-</div>
+<MetricChipRow>
+    <MetricChip Text="@($"Alerts: {AlertSensors:N0}")" />
+    <MetricChip Text="@($"CPU Mean: {CpuAveragePercent:0.0}%")" />
+    <MetricChip Text="@($"Packet Loss Mean: {PacketLossAveragePercent:0.000}%")" />
+    <MetricChip Text="@($"Sequence: {LastSequence:N0}")" />
+</MetricChipRow>

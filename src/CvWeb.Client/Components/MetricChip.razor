@@ -1,0 +1,15 @@
+<span class="metric-chip @CssClass">@Text</span>
+
+@code {
+    /// <summary>
+    /// Gets or sets the metric text rendered inside the chip.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets optional additional CSS classes for the chip.
+    /// </summary>
+    [Parameter]
+    public string CssClass { get; set; } = string.Empty;
+}

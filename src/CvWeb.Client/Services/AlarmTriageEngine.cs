@@ -3,29 +3,80 @@ using System.Text.Json;
 
 namespace CvWeb.Client.Services;
 
+/// <summary>
+/// Configures local alarm triage scoring, debounce, and rate-limiting behavior.
+/// </summary>
 public sealed record AlarmTriageOptions
 {
+    /// <summary>
+    /// Gets the number of baseline samples used for anomaly normalization.
+    /// </summary>
     public int BaselineWindowSize { get; init; } = 24;
 
+    /// <summary>
+    /// Gets the token refill rate for global alert emission.
+    /// </summary>
     public double RateLimitPerSecond { get; init; } = 2.0;
 
+    /// <summary>
+    /// Gets the maximum burst capacity for alert emission.
+    /// </summary>
     public int RateLimitBurst { get; init; } = 4;
 
+    /// <summary>
+    /// Gets the maximum number of clusters retained before stale pruning.
+    /// </summary>
     public int MaxClusterCount { get; init; } = 128;
 
+    /// <summary>
+    /// Gets the trailing debounce window used to group bursty events.
+    /// </summary>
     public TimeSpan DebounceWindow { get; init; } = TimeSpan.FromMilliseconds(1200);
 
+    /// <summary>
+    /// Gets the cooldown used to emit sustained bursts periodically.
+    /// </summary>
     public TimeSpan ClusterCooldown { get; init; } = TimeSpan.FromMilliseconds(2000);
 }
 
+/// <summary>
+/// Represents normalized priority levels produced by triage scoring.
+/// </summary>
 public enum AlertPriority
 {
+    /// <summary>
+    /// No alert should be emitted.
+    /// </summary>
     None = 0,
+
+    /// <summary>
+    /// Low-priority alert.
+    /// </summary>
     P3 = 1,
+
+    /// <summary>
+    /// Medium-priority alert.
+    /// </summary>
     P2 = 2,
+
+    /// <summary>
+    /// High-priority alert.
+    /// </summary>
     P1 = 3
 }
 
+/// <summary>
+/// Represents an emitted, grouped priority alert.
+/// </summary>
+/// <param name="FirstSeen">The first timestamp in the grouped burst.</param>
+/// <param name="LastSeen">The latest timestamp in the grouped burst.</param>
+/// <param name="Priority">The normalized priority label.</param>
+/// <param name="PriorityClass">The CSS class representing severity.</param>
+/// <param name="Node">The source node identifier.</param>
+/// <param name="Category">The derived anomaly category.</param>
+/// <param name="Summary">A short human-readable summary.</param>
+/// <param name="GroupedCount">The number of merged events in this alert.</param>
+/// <param name="Score">The highest score in the grouped burst.</param>
 public sealed record PriorityAlert(
     DateTimeOffset FirstSeen,
     DateTimeOffset LastSeen,
@@ -37,6 +88,14 @@ public sealed record PriorityAlert(
     int GroupedCount,
     double Score);
 
+/// <summary>
+/// Represents the latest triage engine processing result.
+/// </summary>
+/// <param name="LatestScore">The latest computed risk score.</param>
+/// <param name="BufferedClusters">The count of clusters waiting for emission.</param>
+/// <param name="SuppressedEvents">The number of events suppressed by rate limiting.</param>
+/// <param name="PublishedAlerts">The cumulative count of published alerts.</param>
+/// <param name="EmittedAlerts">The alerts emitted during this processing call.</param>
 public sealed record AlarmTriageResult(
     double LatestScore,
     int BufferedClusters,
@@ -44,6 +103,9 @@ public sealed record AlarmTriageResult(
     int PublishedAlerts,
     IReadOnlyList<PriorityAlert> EmittedAlerts);
 
+/// <summary>
+/// Performs deterministic browser-local telemetry triage and alert grouping.
+/// </summary>
 public sealed class AlarmTriageEngine
 {
     private const double Epsilon = 0.0001;
@@ -63,6 +125,10 @@ public sealed class AlarmTriageEngine
     private int _eventCounter;
     private double _latestScore;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AlarmTriageEngine"/> class.
+    /// </summary>
+    /// <param name="options">Optional overrides for triage behavior.</param>
     public AlarmTriageEngine(AlarmTriageOptions? options = null)
     {
         _options = options ?? new AlarmTriageOptions();
@@ -86,6 +152,12 @@ public sealed class AlarmTriageEngine
         _tokens = _options.RateLimitBurst;
     }
 
+    /// <summary>
+    /// Processes one telemetry payload and returns grouped alert outputs.
+    /// </summary>
+    /// <param name="payloadJson">The raw telemetry payload JSON.</param>
+    /// <param name="observedAt">The local receive time for the payload.</param>
+    /// <returns>The triage processing result for this payload.</returns>
     public AlarmTriageResult ProcessRawTelemetry(string payloadJson, DateTimeOffset observedAt)
     {
         if (string.IsNullOrWhiteSpace(payloadJson))

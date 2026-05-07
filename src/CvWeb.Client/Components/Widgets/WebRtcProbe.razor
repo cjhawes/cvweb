@@ -4,27 +4,24 @@
    - This component keeps layout in .razor while WebRTC interop and metric processing stay in WebRtcProbe.razor.cs.
 *@
 
-<div class="widget-status-row">
-    <span class="status-dot @StatusClass"></span>
-    <span>@StatusLabel</span>
-</div>
+<WidgetStatus StatusClass="@StatusClass" Label="@StatusLabel" />
 
 <video id="@VideoId" class="diagnostic-video" autoplay muted playsinline></video>
 
-<div class="metric-chip-row">
-    <span class="metric-chip @HealthChipClass">Health: @NetworkHealth.ToString("0.0")%</span>
-    <span class="metric-chip">Bitrate: @BitrateKbps.ToString("0.0") kbps</span>
-    <span class="metric-chip">Packet Loss: @PacketLossPercent.ToString("0.000")%</span>
-    <span class="metric-chip">Jitter: @JitterMs.ToString("0.0") ms</span>
-</div>
+<MetricChipRow>
+    <MetricChip CssClass="@HealthChipClass" Text="@($"Health: {NetworkHealth:0.0}%")" />
+    <MetricChip Text="@($"Bitrate: {BitrateKbps:0.0} kbps")" />
+    <MetricChip Text="@($"Packet Loss: {PacketLossPercent:0.000}%")" />
+    <MetricChip Text="@($"Jitter: {JitterMs:0.0} ms")" />
+</MetricChipRow>
 
-<div class="metric-chip-row">
-    <span class="metric-chip">RTT: @RoundTripTimeMs.ToString("0.0") ms</span>
-    <span class="metric-chip">FPS: @FramesPerSecond.ToString("0.0")</span>
-    <span class="metric-chip">Track Profile: @TrackProfile</span>
-    <span class="metric-chip">Tracks: @TrackCount</span>
-    <span class="metric-chip">Sequence: @LastSequence.ToString("N0")</span>
-</div>
+<MetricChipRow>
+    <MetricChip Text="@($"RTT: {RoundTripTimeMs:0.0} ms")" />
+    <MetricChip Text="@($"FPS: {FramesPerSecond:0.0}")" />
+    <MetricChip Text="@($"Track Profile: {TrackProfile}")" />
+    <MetricChip Text="@($"Tracks: {TrackCount}")" />
+    <MetricChip Text="@($"Sequence: {LastSequence:N0}")" />
+</MetricChipRow>
 
 <div class="webrtc-chart-grid">
     <section class="webrtc-chart-panel">
