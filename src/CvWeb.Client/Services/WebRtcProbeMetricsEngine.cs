@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace CvWeb.Client.Services;
@@ -97,7 +98,9 @@ public sealed class WebRtcProbeMetricsEngine
     {
         if (_count == 0)
         {
-            return $"0,{height:0.##} {width:0.##},{height:0.##}";
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"0,{height:0.##} {width:0.##},{height:0.##}");
         }
 
         var span = GetSeries(metric);
@@ -118,9 +121,9 @@ public sealed class WebRtcProbeMetricsEngine
                 builder.Append(' ');
             }
 
-            builder.Append(x.ToString("0.##"));
+            builder.Append(x.ToString("0.##", CultureInfo.InvariantCulture));
             builder.Append(',');
-            builder.Append(y.ToString("0.##"));
+            builder.Append(y.ToString("0.##", CultureInfo.InvariantCulture));
         }
 
         return builder.ToString();

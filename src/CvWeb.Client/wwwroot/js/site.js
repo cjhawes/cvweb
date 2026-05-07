@@ -1393,6 +1393,21 @@ void main() {
         };
     }
 
+    function buildWebRtcProbeFallbackSample(state) {
+        state.sampleSequence += 1;
+
+        return {
+            sequence: state.sampleSequence,
+            timestamp: new Date().toISOString(),
+            bitrateKbps: 0,
+            packetLossPercent: 0,
+            jitterMs: 0,
+            roundTripTimeMs: 0,
+            framesPerSecond: 0,
+            connectionState: state.connectionState
+        };
+    }
+
     async function startWebRtcProbe(videoId, dotNetRef) {
         stopWebRtcProbe(videoId);
 
@@ -1478,27 +1493,29 @@ void main() {
                 return;
             }
 
+            let sample;
             try {
                 const stats = await receiver.getStats();
-                const sample = extractWebRtcProbeStats(stats, state);
-
-                if (state.dotNetRef) {
-                    state.dotNetRef.invokeMethodAsync("UpdateWebRtcProbeStats", sample).catch(() => {
-                        // Ignore callback failures during component teardown.
-                    });
-
-                    state.dotNetRef.invokeMethodAsync(
-                        "UpdateWebRtcStats",
-                        sample.framesPerSecond,
-                        sample.jitterMs,
-                        sample.packetLossPercent,
-                        sample.connectionState
-                    ).catch(() => {
-                        // Legacy callback for compatibility with older diagnostics widget.
-                    });
-                }
+                sample = extractWebRtcProbeStats(stats, state);
             } catch {
                 state.connectionState = "degraded";
+                sample = buildWebRtcProbeFallbackSample(state);
+            }
+
+            if (state.dotNetRef) {
+                state.dotNetRef.invokeMethodAsync("UpdateWebRtcProbeStats", sample).catch(() => {
+                    // Ignore callback failures during component teardown.
+                });
+
+                state.dotNetRef.invokeMethodAsync(
+                    "UpdateWebRtcStats",
+                    sample.framesPerSecond,
+                    sample.jitterMs,
+                    sample.packetLossPercent,
+                    sample.connectionState
+                ).catch(() => {
+                    // Legacy callback for compatibility with older diagnostics widget.
+                });
             }
         }, 500);
     }

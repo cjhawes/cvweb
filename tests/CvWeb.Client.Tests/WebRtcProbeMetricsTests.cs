@@ -1,3 +1,4 @@
+using System.Globalization;
 using CvWeb.Client.Services;
 
 namespace CvWeb.Client.Tests;
@@ -62,5 +63,31 @@ public sealed class WebRtcProbeMetricsTests
         var points = engine.BuildPolyline(WebRtcSeriesMetric.Bitrate, 320, 92, bitrateMax);
         var pointCount = points.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
         Assert.Equal(16, pointCount);
+    }
+
+    [Fact]
+    public void BuildPolyline_UsesInvariantCultureFormatting()
+    {
+        var engine = new WebRtcProbeMetricsEngine(capacity: 16);
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("de-DE");
+
+            engine.Push(new WebRtcProbeStatsSample { BitrateKbps = 0 });
+            engine.Push(new WebRtcProbeStatsSample { BitrateKbps = 50 });
+            engine.Push(new WebRtcProbeStatsSample { BitrateKbps = 100 });
+
+            var points = engine.BuildPolyline(WebRtcSeriesMetric.Bitrate, 1, 10, 100);
+            Assert.Equal("0,10 0.5,5 1,0", points);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 }
